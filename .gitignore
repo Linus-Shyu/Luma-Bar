@@ -1,0 +1,9 @@
+.DS_Store
+.build/
+work/
+*.app/
+*.xcuserstate
+.swiftpm/
+.env
+.env.*
+DerivedData/

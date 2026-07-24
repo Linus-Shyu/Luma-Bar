@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>LumaBar</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.lumabar.app</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>luma bar</string>
+    <key>CFBundleIconFile</key>
+    <string>LumaBar</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>luma bar scans and plays your local music library for the notch music controls.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>luma bar uses automation only for Agent actions you request, such as reading the active browser tab or sending a confirmed message.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>luma bar looks up a contact only when you ask the Agent to prepare a message to that person.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>luma bar records your voice only when you start Voice Whisper, then turns it into notes, commit messages, or shell commands.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>luma bar uses speech recognition only when you start Voice Whisper.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>luma bar runs Agent shell commands that you explicitly confirm, including commands that may access Desktop files.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>luma bar runs Agent shell commands that you explicitly confirm, including commands that may access Documents files.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>luma bar runs Agent shell commands that you explicitly confirm, including commands that may access Downloads files.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>luma bar runs Agent shell commands that you explicitly confirm, including commands that may access network volumes.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>luma bar runs Agent shell commands that you explicitly confirm, including commands that may access removable volumes.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>luma bar captures the active game window only when you request screenshot analysis.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+</dict>
+</plist>
