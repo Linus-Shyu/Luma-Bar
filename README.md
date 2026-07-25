@@ -49,6 +49,14 @@ Live CPU, memory, disk, battery, network, and uptime metrics share the desktop w
   <img src="docs/images/luma-bar-system-pet.png" alt="Luma Bar system dashboard and contextual pixel cat" width="100%">
 </p>
 
+### Cursor context at the limit
+
+When Cursor or Codex approaches the context-window ceiling, the notch expands into a live usage gauge and the desktop pet warns you before the session collapses.
+
+<p align="center">
+  <img src="docs/images/luma-bar-context-limit.png" alt="Luma Bar Cursor context window at 98% with pixel pet warning" width="100%">
+</p>
+
 ## Download
 
 Download the ready-to-install DMG from the public [Luma Bar Download repository](https://github.com/Linus-Shyu/Luma-Bar-Download/releases/latest). The binary distribution repository contains no source code.

@@ -49,6 +49,14 @@ Luma Bar 是一款围绕 MacBook 摄像头刘海打造的原生 macOS 灵动岛�
   <img src="docs/images/luma-bar-system-pet.png" alt="Luma Bar 系统仪表盘与上下文像素猫" width="100%">
 </p>
 
+### 上下文接近上限时
+
+当 Cursor 或 Codex 的上下文窗口接近极限时，刘海会展开为实时用量仪表盘，桌面宠物也会提前提醒你，避免会话突然崩掉。
+
+<p align="center">
+  <img src="docs/images/luma-bar-context-limit.png" alt="Luma Bar Cursor 上下文窗口达到 98% 且像素猫发出提醒" width="100%">
+</p>
+
 ## 下载
 
 你可以从公开的 [Luma Bar 下载仓库](https://github.com/Linus-Shyu/Luma-Bar-Download/releases/latest) 获取可直接安装的 DMG。该二进制分发仓库不包含任何源码。
