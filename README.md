@@ -9,6 +9,13 @@
 
 Luma Bar is a native macOS Dynamic Island built around the MacBook camera notch. It combines music playback, a context-aware local agent, voice input, task notifications, system controls, and a small desktop pet in one lightweight interface.
 
+<p align="center">
+  <img src="docs/images/luma-bar-agent.png" alt="Luma Bar Agent reading and translating the active webpage" width="100%">
+</p>
+<p align="center">
+  <sub>The workspace stays in context: read, translate, act, and notify without leaving the screen.</sub>
+</p>
+
 ## Highlights
 
 - **Notch-native interface** — uses the areas beside the MacBook camera notch without covering the camera area.
@@ -23,7 +30,21 @@ Luma Bar is a native macOS Dynamic Island built around the MacBook camera notch.
 
 ## Screenshots
 
-Project screenshots and demo visuals will be added soon.
+### Music becomes part of the notch
+
+Artwork, playlists, playback controls, progress, and synchronized lyrics live in one expanded surface. The AdventureX theme turns the player into a tactile hardware console.
+
+<p align="center">
+  <img src="docs/images/luma-bar-music.png" alt="Luma Bar AdventureX music dashboard with lyrics and playlists" width="100%">
+</p>
+
+### A system monitor with personality
+
+Live CPU, memory, disk, battery, network, and uptime metrics share the desktop with a context-aware pixel pet.
+
+<p align="center">
+  <img src="docs/images/luma-bar-system-pet.png" alt="Luma Bar system dashboard and contextual pixel cat" width="100%">
+</p>
 
 ## Requirements
 
