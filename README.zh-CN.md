@@ -2,7 +2,7 @@
 
 > 围绕 MacBook 刘海生长的桌面工作空间。
 
-[English](README.md) | **简体中文**
+[English](README.en.md) | **简体中文**
 
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111827?logo=apple)](https://www.apple.com/macos/)
 [![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
