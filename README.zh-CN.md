@@ -23,8 +23,8 @@ Luma Bar 是一款围绕 MacBook 摄像头刘海打造的原生 macOS 灵动岛�
 
 - **原生刘海布局**——利用 MacBook 摄像头两侧区域，不遮挡中间摄像头。
 - **音乐与歌词**——扫描本地音频、读取网易云音乐歌单，并展示实时封面、进度和同步歌词。
-- **本地 AI Agent**——支持 OpenAI 与阶跃星辰、流式回复、长期偏好、近期操作上下文和需确认的本地操作。
-- **Cursor 与 Codex 感知**——显示上下文窗口用量，并在单个任务完成时发送提醒。
+- **本地 AI Agent**——基于 OpenAI 的流式回复、长期偏好、近期操作上下文和需确认的本地操作。
+- **Cursor 与 Codex 感知**——显示上下文窗口用量，并在单个任务完成时于刘海内弹出提醒。
 - **Voice Whisper**——按下 `⌘ ⇧ M`，将中文语音直接转写到 Agent 输入框。
 - **macOS 系统控制**——控制播放、音量、亮度、Wi-Fi、外观、应用、信息发送和锁屏。
 - **上下文桌面宠物**——根据时间、天气和当前应用主动做出反应。
@@ -67,7 +67,7 @@ Luma Bar 是一款围绕 MacBook 摄像头刘海打造的原生 macOS 灵动岛�
 - 已安装 Swift 6 工具链的 Mac
 - 推荐使用带摄像头刘海的 MacBook
 - 如需网易云歌单及 `.ncm` 集成，需要安装网易云音乐
-- 如需远程模型功能，需要 OpenAI 或阶跃星辰 API Key
+- 如需远程模型功能，需要 OpenAI API Key
 
 ## 构建与运行
 
@@ -97,27 +97,24 @@ swift build
 - 麦克风与语音识别：使用 Voice Whisper
 - 自动化：控制音乐、信息和系统外观
 - 通讯录：解析消息接收人
-- 通知：显示 Cursor 与 Codex 任务完成提醒
+- 完全磁盘访问：仅当 Cursor 或 Codex 的会话数据位于受保护目录时需要
+
+Cursor 与 Codex 的任务完成提醒直接绘制在刘海内，不走通知中心，因此无需通知权限。
 
 只需授予你实际使用的功能所需要的权限。
 
-## Agent 模型提供商
+## Agent 模型
 
 API Key 保存在 macOS 钥匙串中，不会被提交到仓库。
 
 支持以下环境变量：
 
 ```bash
-# OpenAI
 export OPENAI_API_KEY="..."
 export LUMA_BAR_OPENAI_MODEL="..."
-
-# 阶跃星辰
-export STEP_API_KEY="..."
-export LUMA_BAR_STEPFUN_MODEL="..."
 ```
 
-你也可以在 Agent 仪表盘中选择模型提供商并保存对应的 API Key。
+你也可以直接在 Agent 仪表盘中保存 API Key。
 
 ## 工作原理
 

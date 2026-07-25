@@ -1092,84 +1092,27 @@ extension SystemMetricsSnapshot {
     }
 }
 
-enum AgentLLMProvider: String, CaseIterable, Identifiable, Sendable {
-    case openAI
-    case stepFun
-
-    private static let defaultsKey = "LumaBar.agentLLMProvider"
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .openAI: return "OpenAI"
-        case .stepFun: return "阶跃星辰"
-        }
-    }
-
-    var keyPlaceholder: String {
-        switch self {
-        case .openAI: return "OpenAI API Key"
-        case .stepFun: return "StepFun API Key"
-        }
-    }
-
-    var defaultModel: String {
-        switch self {
-        case .openAI: return "gpt-5.6"
-        case .stepFun: return "step-3.7-flash"
-        }
-    }
-
-    fileprivate var keychainService: String {
-        switch self {
-        case .openAI: return "LumaBar.OpenAI"
-        case .stepFun: return "LumaBar.StepFun"
-        }
-    }
-
-    static var saved: AgentLLMProvider {
-        guard let rawValue = UserDefaults.standard.string(forKey: defaultsKey),
-              let provider = AgentLLMProvider(rawValue: rawValue)
-        else {
-            return .openAI
-        }
-        return provider
-    }
-
-    func persist() {
-        UserDefaults.standard.set(rawValue, forKey: Self.defaultsKey)
-    }
-}
-
 private enum AgentCredentialStore {
     private static let account = "default"
+    private static let keychainService = "LumaBar.OpenAI"
 
-    static func currentAPIKey(for provider: AgentLLMProvider) -> String? {
-        if let keychainKey = keychainAPIKey(for: provider) {
+    static func currentAPIKey() -> String? {
+        if let keychainKey = keychainAPIKey() {
             return keychainKey
         }
-
-        let environment = ProcessInfo.processInfo.environment
-        switch provider {
-        case .openAI:
-            return trimmedKey(environment["OPENAI_API_KEY"])
-        case .stepFun:
-            return trimmedKey(environment["STEP_API_KEY"])
-                ?? trimmedKey(environment["STEPFUN_API_KEY"])
-        }
+        return trimmedKey(ProcessInfo.processInfo.environment["OPENAI_API_KEY"])
     }
 
-    static func saveAPIKey(_ key: String, for provider: AgentLLMProvider) throws {
+    static func saveAPIKey(_ key: String) throws {
         guard let data = trimmedKey(key)?.data(using: .utf8) else {
             throw AgentCredentialError.emptyKey
         }
 
-        deleteAPIKey(for: provider)
+        deleteAPIKey()
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: provider.keychainService,
+            kSecAttrService as String: keychainService,
             kSecAttrAccount as String: account,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             kSecValueData as String: data
@@ -1180,19 +1123,19 @@ private enum AgentCredentialStore {
         }
     }
 
-    static func deleteAPIKey(for provider: AgentLLMProvider) {
+    static func deleteAPIKey() {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: provider.keychainService,
+            kSecAttrService as String: keychainService,
             kSecAttrAccount as String: account
         ]
         SecItemDelete(query as CFDictionary)
     }
 
-    private static func keychainAPIKey(for provider: AgentLLMProvider) -> String? {
+    private static func keychainAPIKey() -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: provider.keychainService,
+            kSecAttrService as String: keychainService,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
@@ -1235,9 +1178,9 @@ struct AgentTokenUsage: Codable, Equatable, Sendable {
 
     private static let defaultsKey = "LumaBar.agentTokenUsage"
 
-    static func saved(for provider: AgentLLMProvider) -> AgentTokenUsage {
+    static var saved: AgentTokenUsage {
         guard
-            let data = UserDefaults.standard.data(forKey: defaultsKey(for: provider)),
+            let data = UserDefaults.standard.data(forKey: defaultsKey),
             let usage = try? JSONDecoder().decode(AgentTokenUsage.self, from: data)
         else {
             return AgentTokenUsage()
@@ -1245,13 +1188,9 @@ struct AgentTokenUsage: Codable, Equatable, Sendable {
         return usage
     }
 
-    func persist(for provider: AgentLLMProvider) {
+    func persist() {
         guard let data = try? JSONEncoder().encode(self) else { return }
-        UserDefaults.standard.set(data, forKey: Self.defaultsKey(for: provider))
-    }
-
-    private static func defaultsKey(for provider: AgentLLMProvider) -> String {
-        provider == .openAI ? defaultsKey : "\(defaultsKey).\(provider.rawValue)"
+        UserDefaults.standard.set(data, forKey: Self.defaultsKey)
     }
 }
 
@@ -1329,33 +1268,32 @@ private enum CodexSessionUsageReader {
 
     static func latestSnapshot(previous: CodexTokenUsageSnapshot?) -> CodexTokenUsageSnapshot? {
         let fileManager = FileManager.default
-        let sessionsRoot = fileManager.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex/sessions", isDirectory: true)
         let resourceKeys: Set<URLResourceKey> = [
             .isRegularFileKey,
             .contentModificationDateKey
         ]
 
-        guard let enumerator = fileManager.enumerator(
-            at: sessionsRoot,
-            includingPropertiesForKeys: Array(resourceKeys),
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else {
-            return nil
-        }
-
         var latestFile: (url: URL, modifiedAt: Date)?
-        for case let url as URL in enumerator where url.pathExtension == "jsonl" {
-            guard
-                let values = try? url.resourceValues(forKeys: resourceKeys),
-                values.isRegularFile == true,
-                let modifiedAt = values.contentModificationDate
-            else {
+        for sessionsRoot in sessionRoots() {
+            guard let enumerator = fileManager.enumerator(
+                at: sessionsRoot,
+                includingPropertiesForKeys: Array(resourceKeys),
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else {
                 continue
             }
+            for case let url as URL in enumerator where url.pathExtension == "jsonl" {
+                guard
+                    let values = try? url.resourceValues(forKeys: resourceKeys),
+                    values.isRegularFile == true,
+                    let modifiedAt = values.contentModificationDate
+                else {
+                    continue
+                }
 
-            if latestFile == nil || modifiedAt > latestFile!.modifiedAt {
-                latestFile = (url, modifiedAt)
+                if latestFile == nil || modifiedAt > latestFile!.modifiedAt {
+                    latestFile = (url, modifiedAt)
+                }
             }
         }
 
@@ -1369,33 +1307,53 @@ private enum CodexSessionUsageReader {
 
     static func taskStates() -> [ExternalTaskState] {
         let fileManager = FileManager.default
-        let sessionsRoot = fileManager.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex/sessions", isDirectory: true)
         let resourceKeys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey]
-        guard let enumerator = fileManager.enumerator(
-            at: sessionsRoot,
-            includingPropertiesForKeys: Array(resourceKeys),
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else {
-            return []
-        }
 
         var files: [(url: URL, modifiedAt: Date)] = []
-        for case let url as URL in enumerator where url.pathExtension == "jsonl" {
-            guard
-                let values = try? url.resourceValues(forKeys: resourceKeys),
-                values.isRegularFile == true,
-                let modifiedAt = values.contentModificationDate
-            else {
+        for sessionsRoot in sessionRoots() {
+            guard let enumerator = fileManager.enumerator(
+                at: sessionsRoot,
+                includingPropertiesForKeys: Array(resourceKeys),
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else {
                 continue
             }
-            files.append((url, modifiedAt))
+            for case let url as URL in enumerator where url.pathExtension == "jsonl" {
+                guard
+                    let values = try? url.resourceValues(forKeys: resourceKeys),
+                    values.isRegularFile == true,
+                    let modifiedAt = values.contentModificationDate
+                else {
+                    continue
+                }
+                files.append((url, modifiedAt))
+            }
         }
 
         return files
             .sorted { $0.modifiedAt > $1.modifiedAt }
             .prefix(24)
             .compactMap { taskState(from: $0.url, modifiedAt: $0.modifiedAt) }
+    }
+
+    private static func sessionRoots() -> [URL] {
+        let fileManager = FileManager.default
+        var roots: [URL] = []
+        if let customHome = ProcessInfo.processInfo.environment["CODEX_HOME"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !customHome.isEmpty
+        {
+            roots.append(
+                URL(fileURLWithPath: customHome, isDirectory: true)
+                    .appendingPathComponent("sessions", isDirectory: true)
+            )
+        }
+        roots.append(
+            fileManager.homeDirectoryForCurrentUser
+                .appendingPathComponent(".codex/sessions", isDirectory: true)
+        )
+        var seen = Set<String>()
+        return roots.filter { seen.insert($0.standardizedFileURL.path).inserted }
     }
 
     private static func taskState(from url: URL, modifiedAt: Date) -> ExternalTaskState? {
@@ -1409,16 +1367,13 @@ private enum CodexSessionUsageReader {
         let readSize = min(UInt64(512 * 1_024), fileSize)
         try? handle.seek(toOffset: fileSize - readSize)
         let text = String(decoding: (try? handle.readToEnd()) ?? Data(), as: UTF8.self)
-        let started = text.range(of: "\"type\":\"task_started\"", options: .backwards)
-        let completed = text.range(of: "\"type\":\"task_complete\"", options: .backwards)
-        guard started != nil || completed != nil else { return nil }
 
-        let isRunning = started.map { start in
-            completed.map { start.lowerBound > $0.lowerBound } ?? true
-        } ?? false
-        let isComplete = completed.map { completion in
-            started.map { completion.lowerBound > $0.lowerBound } ?? true
-        } ?? false
+        // Codex writes `task_complete` for failed turns too (quota, auth, tool errors),
+        // so decode the last lifecycle event instead of matching raw substrings.
+        guard let event = lastLifecycleEvent(in: text) else { return nil }
+
+        let isRunning = event.type == "task_started"
+        let isComplete = event.type == "task_complete" && event.error == nil
 
         return ExternalTaskState(
             source: .codex,
@@ -1428,6 +1383,42 @@ private enum CodexSessionUsageReader {
             isComplete: isComplete,
             updatedAt: modifiedAt
         )
+    }
+
+    private struct CodexLifecyclePayload: Decodable {
+        let type: String
+        let error: CodexLifecycleError?
+    }
+
+    private struct CodexLifecycleError: Decodable {
+        let message: String?
+    }
+
+    private struct CodexLifecycleEvent: Decodable {
+        let payload: CodexLifecyclePayload
+    }
+
+    private static func lastLifecycleEvent(in text: String) -> CodexLifecyclePayload? {
+        let lifecycleTypes: Set<String> = ["task_started", "task_complete", "turn_aborted"]
+        let decoder = JSONDecoder()
+
+        for line in text.split(separator: "\n").reversed() {
+            guard line.contains("\"task_started\"")
+                    || line.contains("\"task_complete\"")
+                    || line.contains("\"turn_aborted\"")
+            else {
+                continue
+            }
+            guard let data = line.data(using: .utf8),
+                  let event = try? decoder.decode(CodexLifecycleEvent.self, from: data),
+                  lifecycleTypes.contains(event.payload.type)
+            else {
+                continue
+            }
+            return event.payload
+        }
+
+        return nil
     }
 
     private static func snapshot(
@@ -1581,11 +1572,8 @@ private enum CursorSessionUsageReader {
                         timeIntervalSince1970: (composer.lastUpdatedAt ?? header.lastUpdatedAt ?? 0) / 1000
                     )
                 )
-                if statesByID.values.contains(where: {
-                    $0.sessionID.hasSuffix("/\(header.composerId)/\(header.composerId).jsonl")
-                }) {
-                    continue
-                }
+                // Transcript state for the same composer already won; never queue it twice.
+                guard statesByID[state.sessionID] == nil else { continue }
                 statesByID[state.sessionID] = state
             }
         }
@@ -1655,9 +1643,11 @@ private enum CursorSessionUsageReader {
 
         let isTurnEnded = event.type == "turn_ended"
         let title = selectedComposerName(agentID: agentID, in: databaseURL) ?? "Cursor"
+        // Use the composer/agent ID as the canonical identity so transcript and
+        // composer-derived states for the same task never notify twice.
         return ExternalTaskState(
             source: .cursor,
-            sessionID: url.path,
+            sessionID: agentID,
             title: title,
             isRunning: !isTurnEnded,
             isComplete: isTurnEnded && event.status == "success",
@@ -1684,10 +1674,17 @@ private enum CursorSessionUsageReader {
     private static func databaseURLs() -> [URL] {
         let support = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support", isDirectory: true)
-        return [
-            support.appendingPathComponent("Cursor/User/globalStorage/state.vscdb"),
-            support.appendingPathComponent("Cursor - Insiders/User/globalStorage/state.vscdb")
+        let applicationSupportNames = [
+            "Cursor",
+            "Cursor - Insiders",
+            "Cursor Beta",
+            "Cursor Nightly"
         ]
+        return applicationSupportNames.map {
+            support
+                .appendingPathComponent($0, isDirectory: true)
+                .appendingPathComponent("User/globalStorage/state.vscdb")
+        }
     }
 
     private static func latestSnapshot(
@@ -2108,271 +2105,6 @@ private enum OpenAIClientError: LocalizedError {
             return "Invalid OpenAI response."
         case .requestFailed(let statusCode, let message):
             return "OpenAI request failed (\(statusCode)): \(message)"
-        case .api(let message):
-            return message
-        }
-    }
-}
-
-private enum StepFunChatClient {
-    private static let endpoint = URL(string: "https://api.stepfun.com/v1/chat/completions")!
-
-    static func stream(
-        prompt: String,
-        instructions: String,
-        apiKey: String,
-        model: String,
-        imageData: Data? = nil,
-        onDelta: @escaping @Sendable (String) async -> Void
-    ) async throws -> AgentTokenUsage? {
-        var request = makeRequest(apiKey: apiKey, timeout: 45)
-        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "model": model,
-            "messages": messages(prompt: prompt, instructions: instructions, imageData: imageData),
-            "stream": true,
-            "max_tokens": 700
-        ])
-
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw StepFunClientError.invalidResponse
-        }
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            throw StepFunClientError.requestFailed(
-                statusCode: httpResponse.statusCode,
-                message: try await readBody(from: bytes)
-            )
-        }
-
-        var completedUsage: AgentTokenUsage?
-        for try await line in bytes.lines {
-            try Task.checkCancellation()
-            guard line.hasPrefix("data:") else { continue }
-            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
-            if payload == "[DONE]" {
-                break
-            }
-            guard let data = payload.data(using: .utf8) else { continue }
-            let chunk = try JSONDecoder().decode(StepFunStreamChunk.self, from: data)
-            if let message = chunk.error?.message {
-                throw StepFunClientError.api(message)
-            }
-            if let usage = chunk.usage {
-                completedUsage = usage.agentUsage
-            }
-            for choice in chunk.choices ?? [] {
-                if let delta = choice.delta.content, !delta.isEmpty {
-                    await onDelta(delta)
-                }
-            }
-        }
-        return completedUsage
-    }
-
-    static func complete(
-        prompt: String,
-        instructions: String,
-        apiKey: String,
-        model: String,
-        maxOutputTokens: Int = 300
-    ) async throws -> String {
-        var request = makeRequest(apiKey: apiKey, timeout: 30)
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "model": model,
-            "messages": messages(prompt: prompt, instructions: instructions, imageData: nil),
-            "stream": false,
-            "max_tokens": maxOutputTokens
-        ])
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw StepFunClientError.invalidResponse
-        }
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            throw StepFunClientError.requestFailed(
-                statusCode: httpResponse.statusCode,
-                message: String(decoding: data, as: UTF8.self)
-            )
-        }
-        let decoded = try JSONDecoder().decode(StepFunCompletedResponse.self, from: data)
-        let text = decoded.choices
-            .compactMap(\.message.content)
-            .joined()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { throw StepFunClientError.invalidResponse }
-        return text
-    }
-
-    private static func makeRequest(apiKey: String, timeout: TimeInterval) -> URLRequest {
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.timeoutInterval = timeout
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        return request
-    }
-
-    private static func messages(
-        prompt: String,
-        instructions: String,
-        imageData: Data?
-    ) -> [[String: Any]] {
-        var result: [[String: Any]] = [
-            ["role": "system", "content": instructions]
-        ]
-        if let imageData {
-            result.append([
-                "role": "user",
-                "content": [
-                    ["type": "text", "text": prompt],
-                    [
-                        "type": "image_url",
-                        "image_url": [
-                            "url": "data:image/jpeg;base64,\(imageData.base64EncodedString())",
-                            "detail": "low"
-                        ]
-                    ]
-                ]
-            ])
-        } else {
-            result.append(["role": "user", "content": prompt])
-        }
-        return result
-    }
-
-    private static func readBody(from bytes: URLSession.AsyncBytes) async throws -> String {
-        var data = Data()
-        for try await byte in bytes {
-            data.append(byte)
-        }
-        let text = String(decoding: data, as: UTF8.self)
-        return text.isEmpty ? "No response body." : text
-    }
-}
-
-private enum AgentLLMClient {
-    static func stream(
-        provider: AgentLLMProvider,
-        prompt: String,
-        instructions: String,
-        apiKey: String,
-        model: String,
-        imageData: Data? = nil,
-        onDelta: @escaping @Sendable (String) async -> Void
-    ) async throws -> AgentTokenUsage? {
-        switch provider {
-        case .openAI:
-            return try await OpenAIResponsesClient.stream(
-                prompt: prompt,
-                instructions: instructions,
-                apiKey: apiKey,
-                model: model,
-                imageData: imageData,
-                onDelta: onDelta
-            )
-        case .stepFun:
-            return try await StepFunChatClient.stream(
-                prompt: prompt,
-                instructions: instructions,
-                apiKey: apiKey,
-                model: model,
-                imageData: imageData,
-                onDelta: onDelta
-            )
-        }
-    }
-
-    static func complete(
-        provider: AgentLLMProvider,
-        prompt: String,
-        instructions: String,
-        apiKey: String,
-        model: String,
-        maxOutputTokens: Int
-    ) async throws -> String {
-        switch provider {
-        case .openAI:
-            return try await OpenAIResponsesClient.complete(
-                prompt: prompt,
-                instructions: instructions,
-                apiKey: apiKey,
-                model: model,
-                maxOutputTokens: maxOutputTokens
-            )
-        case .stepFun:
-            return try await StepFunChatClient.complete(
-                prompt: prompt,
-                instructions: instructions,
-                apiKey: apiKey,
-                model: model,
-                maxOutputTokens: maxOutputTokens
-            )
-        }
-    }
-}
-
-private struct StepFunStreamChunk: Decodable {
-    let choices: [Choice]?
-    let usage: StepFunUsage?
-    let error: ErrorPayload?
-
-    struct Choice: Decodable {
-        let delta: Delta
-    }
-
-    struct Delta: Decodable {
-        let content: String?
-    }
-
-    struct ErrorPayload: Decodable {
-        let message: String
-    }
-}
-
-private struct StepFunCompletedResponse: Decodable {
-    let choices: [Choice]
-
-    struct Choice: Decodable {
-        let message: Message
-    }
-
-    struct Message: Decodable {
-        let content: String?
-    }
-}
-
-private struct StepFunUsage: Decodable {
-    let promptTokens: Int
-    let completionTokens: Int
-    let totalTokens: Int
-
-    enum CodingKeys: String, CodingKey {
-        case promptTokens = "prompt_tokens"
-        case completionTokens = "completion_tokens"
-        case totalTokens = "total_tokens"
-    }
-
-    var agentUsage: AgentTokenUsage {
-        AgentTokenUsage(
-            inputTokens: promptTokens,
-            outputTokens: completionTokens,
-            totalTokens: totalTokens
-        )
-    }
-}
-
-private enum StepFunClientError: LocalizedError {
-    case invalidResponse
-    case requestFailed(statusCode: Int, message: String)
-    case api(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidResponse:
-            return "阶跃星辰返回了无法解析的响应。"
-        case .requestFailed(let statusCode, let message):
-            return "阶跃星辰请求失败（\(statusCode)）：\(message)"
         case .api(let message):
             return message
         }
@@ -4801,6 +4533,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                 self?.model.presentCursorCompletionTestNotice()
             }
         }
+        if CommandLine.arguments.contains("--test-context-limit") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                self?.model.presentContextLimitTestReaction()
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -6755,6 +6492,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         )
         testCursorCompletionItem.target = self
         menu.addItem(testCursorCompletionItem)
+        let testContextLimitItem = NSMenuItem(
+            title: "测试上下文极限提醒",
+            action: #selector(testContextLimitFromMenu),
+            keyEquivalent: ""
+        )
+        testContextLimitItem.target = self
+        menu.addItem(testContextLimitItem)
         menu.addItem(.separator())
 
         let selectionItem = NSMenuItem(
@@ -6809,6 +6553,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
     @objc private func testCursorCompletionFromMenu() {
         model.presentCursorCompletionTestNotice()
+    }
+
+    @objc private func testContextLimitFromMenu() {
+        model.presentContextLimitTestReaction()
     }
 
     @objc private func selectBarTheme() {
@@ -7608,19 +7356,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     @Published var agentInput = ""
     @Published var agentResponse = "Ready."
     @Published var agentStatus = "Ready"
-    @Published var agentProvider = AgentLLMProvider.saved {
-        didSet {
-            guard agentProvider != oldValue else { return }
-            agentProvider.persist()
-            handleAgentProviderChange()
-        }
-    }
     @Published var agentAPIKeyDraft = ""
-    @Published var agentHasAPIKey = AgentCredentialStore.currentAPIKey(for: AgentLLMProvider.saved) != nil
+    @Published var agentHasAPIKey = AgentCredentialStore.currentAPIKey() != nil
     @Published var isAgentStreaming = false
-    @Published var agentTokenUsage = AgentTokenUsage.saved(for: AgentLLMProvider.saved) {
+    @Published var agentTokenUsage = AgentTokenUsage.saved {
         didSet {
-            agentTokenUsage.persist(for: agentProvider)
+            agentTokenUsage.persist()
         }
     }
     @Published private var codexTokenUsage: CodexTokenUsageSnapshot?
@@ -7712,32 +7453,20 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     private var lastExternalTaskRefreshDate = Date.distantPast
     private var isRefreshingExternalTaskStates = false
     private var observedExternalTaskStates: [String: ExternalTaskState] = [:]
+    private var hasSeededExternalTaskStates = false
     private var pendingTaskCompletionStates: [ExternalTaskState] = []
     private var taskCompletionDismissWorkItem: DispatchWorkItem?
     private let externalTaskObservationStartedAt = Date()
     private var agentModelName: String {
         let environment = ProcessInfo.processInfo.environment
-        switch agentProvider {
-        case .openAI:
-            return environment["LUMA_BAR_OPENAI_MODEL"]
-                ?? environment["OPENAI_MODEL"]
-                ?? agentProvider.defaultModel
-        case .stepFun:
-            return environment["LUMA_BAR_STEPFUN_MODEL"]
-                ?? environment["STEPFUN_MODEL"]
-                ?? agentProvider.defaultModel
-        }
+        return environment["LUMA_BAR_OPENAI_MODEL"]
+            ?? environment["OPENAI_MODEL"]
+            ?? "gpt-5.6"
     }
     var agentTokenLimit: Int {
-        let environment = ProcessInfo.processInfo.environment
-        let configured: Int?
-        switch agentProvider {
-        case .openAI:
-            configured = environment["LUMA_BAR_OPENAI_TOKEN_LIMIT"].flatMap(Int.init)
-        case .stepFun:
-            configured = environment["LUMA_BAR_STEPFUN_TOKEN_LIMIT"].flatMap(Int.init)
-        }
-        return max(1_000, configured ?? (agentProvider == .stepFun ? 256_000 : 128_000))
+        let configured = ProcessInfo.processInfo.environment["LUMA_BAR_OPENAI_TOKEN_LIMIT"]
+            .flatMap(Int.init)
+        return max(1_000, configured ?? 128_000)
     }
     private let workReminderInterval: TimeInterval = {
         let environment = ProcessInfo.processInfo.environment
@@ -8001,7 +7730,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var compactAgentTitle: String {
-        isAgentStreaming ? "\(agentProvider.displayName) Streaming" : activeAppContext.agentTitle
+        isAgentStreaming ? "GPT Streaming" : activeAppContext.agentTitle
     }
 
     var compactAgentSubtitle: String {
@@ -10519,7 +10248,25 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             scheduleNextProactivePetMessage(after: Date(), soon: true)
         }
 
-        if let tokenSource = Self.externalTokenSource(bundleIdentifier: bundleIdentifier, appName: appName) {
+        let terminalBundleIdentifiers: Set<String> = [
+            "com.apple.Terminal",
+            "com.googlecode.iterm2",
+            "dev.warp.Warp-Stable"
+        ]
+        let windowTitle = terminalBundleIdentifiers.contains(bundleIdentifier)
+            ? AgentContextProvider.capture(
+                processID: application.processIdentifier,
+                bundleIdentifier: bundleIdentifier,
+                appName: appName,
+                includeFocusedText: false
+            ).windowTitle
+            : nil
+
+        if let tokenSource = Self.externalTokenSource(
+            bundleIdentifier: bundleIdentifier,
+            appName: appName,
+            windowTitle: windowTitle
+        ) {
             // Keep selection translation / agent replies visible while Cursor or Codex is frontmost.
             if isSelectionTranslationActive
                 || (isExpanded && (activeMode == .agent || isAgentStreaming || isAgentShellRunning))
@@ -10598,7 +10345,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             "dev.warp.Warp-Stable"
         ]
 
-        if codingBundleIdentifiers.contains(bundleIdentifier) {
+        if codingBundleIdentifiers.contains(bundleIdentifier)
+            || bundleIdentifier.hasPrefix("com.todesktop.")
+        {
             return .coding
         }
 
@@ -10674,15 +10423,24 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         return .general
     }
 
-    private static func externalTokenSource(bundleIdentifier: String, appName: String) -> ExternalTokenSource? {
+    private static func externalTokenSource(
+        bundleIdentifier: String,
+        appName: String,
+        windowTitle: String?
+    ) -> ExternalTokenSource? {
         if bundleIdentifier == "com.openai.codex"
             || appName.caseInsensitiveCompare("Codex") == .orderedSame
+            || windowTitle?.localizedCaseInsensitiveContains("codex") == true
         {
             return .codex
         }
 
+        // Cursor Stable/Insiders/Nightly all ship under the ToDesktop namespace with
+        // different IDs, so match the namespace plus the product name instead of one ID.
+        let normalizedAppName = appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if bundleIdentifier == "com.todesktop.230313mzl4w4u92"
-            || appName.localizedCaseInsensitiveContains("Cursor")
+            || (bundleIdentifier.hasPrefix("com.todesktop.") && normalizedAppName.contains("cursor"))
+            || normalizedAppName.hasPrefix("cursor")
         {
             return .cursor
         }
@@ -10778,10 +10536,15 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
             guard let self else { return }
             self.isRefreshingExternalTaskStates = false
+            // The first sweep only seeds the baseline; otherwise every task that
+            // finished before launch would fire a stale "task done" notice.
+            let isSeedingPass = !self.hasSeededExternalTaskStates
+            self.hasSeededExternalTaskStates = true
             for state in states {
                 let identity = "\(state.source.rawValue):\(state.sessionID)"
                 let previous = self.observedExternalTaskStates[identity]
                 self.observedExternalTaskStates[identity] = state
+                guard !isSeedingPass else { continue }
                 guard state.isComplete else { continue }
                 let transitionedFromRunning = previous?.isRunning == true
                 let completedBetweenPolls = previous?.isComplete == true
@@ -10857,6 +10620,29 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         )
     }
 
+    func presentContextLimitTestReaction() {
+        let snapshot = CodexTokenUsageSnapshot(
+            source: .cursor,
+            usage: AgentTokenUsage(
+                inputTokens: 194_000,
+                outputTokens: 2_000,
+                totalTokens: 196_000
+            ),
+            contextWindow: 200_000,
+            model: "Cursor Agent",
+            sessionURL: URL(fileURLWithPath: "/tmp/luma-bar-context-limit-test"),
+            updatedAt: Date()
+        )
+        codexTokenUsage = snapshot
+        activeExternalTokenSource = .cursor
+        isCodexTokenAutoExpanded = true
+        activeMode = .token
+        isExpanded = true
+        lastCodexTokenAlertSessionURL = nil
+        lastCodexTokenAlertLevel = 0
+        handleCodexTokenThreshold(snapshot)
+    }
+
     func showMusic() {
         endCodexTokenAutoExpansion()
         activeMode = .music
@@ -10874,21 +10660,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     func refreshAgentKeyStatus() {
-        agentHasAPIKey = AgentCredentialStore.currentAPIKey(for: agentProvider) != nil
-    }
-
-    private func handleAgentProviderChange() {
-        agentTask?.cancel()
-        agentRequestToken = UUID()
-        isAgentStreaming = false
-        agentLiveEstimatedTokens = 0
-        agentAPIKeyDraft = ""
-        agentTokenUsage = AgentTokenUsage.saved(for: agentProvider)
-        refreshAgentKeyStatus()
-        agentStatus = agentHasAPIKey ? "\(agentProvider.displayName) ready" : "API key needed"
-        agentResponse = agentHasAPIKey
-            ? "已切换到 \(agentProvider.displayName)。"
-            : "已切换到 \(agentProvider.displayName)，保存 API Key 后即可使用。"
+        agentHasAPIKey = AgentCredentialStore.currentAPIKey() != nil
     }
 
     func beginAgentShellRequest() {
@@ -11130,11 +10902,11 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     func saveAgentAPIKey() {
         do {
-            try AgentCredentialStore.saveAPIKey(agentAPIKeyDraft, for: agentProvider)
+            try AgentCredentialStore.saveAPIKey(agentAPIKeyDraft)
             agentAPIKeyDraft = ""
             agentHasAPIKey = true
-            agentStatus = "\(agentProvider.displayName) key saved"
-            agentResponse = "\(agentProvider.displayName) API Key 已安全保存。"
+            agentStatus = "OpenAI key saved"
+            agentResponse = "OpenAI API Key 已安全保存。"
         } catch {
             agentStatus = "Key save failed"
             agentResponse = error.localizedDescription
@@ -11142,11 +10914,11 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     func clearSavedAgentAPIKey() {
-        AgentCredentialStore.deleteAPIKey(for: agentProvider)
+        AgentCredentialStore.deleteAPIKey()
         agentAPIKeyDraft = ""
         agentHasAPIKey = false
-        agentStatus = "\(agentProvider.displayName) key cleared"
-        agentResponse = "\(agentProvider.displayName) API Key 已清除。"
+        agentStatus = "OpenAI key cleared"
+        agentResponse = "OpenAI API Key 已清除。"
     }
 
     func pasteAgentAPIKeyFromPasteboard() {
@@ -11509,11 +11281,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
         isSelectionTranslationActive = purpose == .translation
 
-        let provider = agentProvider
-        guard let apiKey = AgentCredentialStore.currentAPIKey(for: provider) else {
+        guard let apiKey = AgentCredentialStore.currentAPIKey() else {
             agentHasAPIKey = false
             agentStatus = "API key needed"
-            agentResponse = "请先保存 \(provider.displayName) API Key。"
+            agentResponse = "请先保存 OpenAI API Key。"
             return
         }
 
@@ -11538,7 +11309,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
         let processID = activeExternalApplicationPID
 
-        agentTask = Task { [weak self, prompt, instructions, apiKey, modelName, provider, requestToken, purpose, context, processID, autoExecuteShellCommand] in
+        agentTask = Task { [weak self, prompt, instructions, apiKey, modelName, requestToken, purpose, context, processID, autoExecuteShellCommand] in
             guard let self else { return }
             let startedAt = Date()
             do {
@@ -11561,8 +11332,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 self.agentLiveEstimatedTokens = estimatedInputTokens
                 self.agentStatus = purpose == .translation ? "Translating" : "Connecting"
 
-                let usage = try await AgentLLMClient.stream(
-                    provider: provider,
+                let usage = try await OpenAIResponsesClient.stream(
                     prompt: contextualPrompt,
                     instructions: instructions,
                     apiKey: apiKey,
@@ -11794,23 +11564,21 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     private func planAndExecuteLocalTool(_ prompt: String) {
-        let provider = agentProvider
-        guard let apiKey = AgentCredentialStore.currentAPIKey(for: provider), !apiKey.isEmpty else {
+        guard let apiKey = AgentCredentialStore.currentAPIKey(), !apiKey.isEmpty else {
             completeAgentLocalResponse(
                 status: "API key needed",
-                response: "需要 \(provider.displayName) API Key 才能规划本地动作。"
+                response: "需要 OpenAI API Key 才能规划本地动作。"
             )
             return
         }
         agentTask?.cancel()
         isAgentStreaming = true
         agentStatus = "规划本地动作"
-        agentResponse = "\(provider.displayName) 正在选择本地工具…"
+        agentResponse = "GPT 正在选择本地工具…"
         let modelName = agentModelName
-        agentTask = Task { [weak self, prompt, apiKey, modelName, provider] in
+        agentTask = Task { [weak self, prompt, apiKey, modelName] in
             do {
-                let output = try await AgentLLMClient.complete(
-                    provider: provider,
+                let output = try await OpenAIResponsesClient.complete(
                     prompt: prompt,
                     instructions: """
                     Convert the user's macOS request into exactly one JSON object and nothing else.
@@ -15328,7 +15096,6 @@ private final class AgentSecureTextFieldView: NSSecureTextField {
 private struct AgentAPIKeyField: NSViewRepresentable {
     @Binding var text: String
     let hasSavedKey: Bool
-    let provider: AgentLLMProvider
     let shouldFocus: Bool
     let onSubmit: () -> Void
     @Environment(\.islandTheme) private var theme
@@ -15344,7 +15111,7 @@ private struct AgentAPIKeyField: NSViewRepresentable {
         field.drawsBackground = false
         field.focusRingType = .none
         field.textColor = textColor
-        field.placeholderString = provider.keyPlaceholder
+        field.placeholderString = "OpenAI API Key"
         field.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
         field.lineBreakMode = .byTruncatingMiddle
         field.usesSingleLineMode = true
@@ -15366,9 +15133,9 @@ private struct AgentAPIKeyField: NSViewRepresentable {
 
     private var parentPlaceholder: String {
         if hasSavedKey {
-            return "\(provider.displayName) key saved  " + String(repeating: "\u{2022}", count: 10)
+            return "OpenAI key saved  " + String(repeating: "\u{2022}", count: 10)
         }
-        return provider.keyPlaceholder
+        return "OpenAI API Key"
     }
 
     private var textColor: NSColor {
@@ -16651,16 +16418,6 @@ struct AgentDashboardView: View {
     var body: some View {
         VStack(spacing: theme.isAdventureX ? 6 : 8) {
             HStack(spacing: 8) {
-                Picker("模型服务", selection: $model.agentProvider) {
-                    ForEach(AgentLLMProvider.allCases) { provider in
-                        Text(provider.displayName).tag(provider)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(width: 104, height: 24)
-                .help("选择 Agent 模型服务")
-
                 Image(systemName: model.agentHasAPIKey ? "key.fill" : "key")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(model.agentHasAPIKey ? theme.activityAccent : theme.foreground(opacity: 0.72))
@@ -16669,7 +16426,6 @@ struct AgentDashboardView: View {
                 AgentAPIKeyField(
                     text: $model.agentAPIKeyDraft,
                     hasSavedKey: model.agentHasAPIKey,
-                    provider: model.agentProvider,
                     shouldFocus: !model.agentHasAPIKey
                 ) {
                     model.saveAgentAPIKey()

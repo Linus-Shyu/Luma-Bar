@@ -23,8 +23,8 @@ Luma Bar is a native macOS Dynamic Island built around the MacBook camera notch.
 
 - **Notch-native interface** — uses the areas beside the MacBook camera notch without covering the camera area.
 - **Music and lyrics** — scans local audio, reads NetEase Cloud Music playlists, follows live playback, and loads artwork, progress, and synchronized lyrics.
-- **Local AI agent** — supports OpenAI and StepFun, streaming responses, persistent preferences, recent-operation context, and confirmed local actions.
-- **Cursor and Codex awareness** — displays context-window usage and sends a notification when an individual task finishes.
+- **Local AI agent** — OpenAI-powered streaming responses, persistent preferences, recent-operation context, and confirmed local actions.
+- **Cursor and Codex awareness** — displays context-window usage and shows an in-notch alert when an individual task finishes.
 - **Voice Whisper** — press `⌘ ⇧ M` to dictate Chinese text directly into the Agent input.
 - **macOS controls** — control playback, volume, brightness, Wi-Fi, appearance, applications, Messages, and screen locking.
 - **Contextual desktop pet** — reacts to time, weather, and the active application.
@@ -67,7 +67,7 @@ Download the ready-to-install DMG from the public [Luma Bar Download repository]
 - A Mac with Swift 6 toolchain installed
 - A MacBook with a camera notch is recommended
 - NetEase Cloud Music for NetEase playlist and `.ncm` integration
-- An OpenAI or StepFun API key for remote-model features
+- An OpenAI API key for remote-model features
 
 ## Build and run
 
@@ -97,27 +97,24 @@ Luma Bar may request the following macOS permissions depending on the features y
 - Microphone and Speech Recognition, for Voice Whisper
 - Automation, for controlling Music, Messages, and system appearance
 - Contacts, for resolving message recipients
-- Notifications, for Cursor and Codex completion alerts
+- Full Disk Access, only if Cursor or Codex keep their session data in a protected location
+
+Cursor and Codex completion alerts are drawn inside the notch and do not use Notification Center, so no notification permission is required.
 
 Grant only the permissions needed by the features you intend to use.
 
-## Agent providers
+## Agent provider
 
 API keys are stored in macOS Keychain and are never committed to the repository.
 
 Supported environment variables:
 
 ```bash
-# OpenAI
 export OPENAI_API_KEY="..."
 export LUMA_BAR_OPENAI_MODEL="..."
-
-# StepFun
-export STEP_API_KEY="..."
-export LUMA_BAR_STEPFUN_MODEL="..."
 ```
 
-You can also select a provider and save its key from the Agent dashboard.
+You can also save the key from the Agent dashboard.
 
 ## How it works
 
