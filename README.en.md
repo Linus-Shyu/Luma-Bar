@@ -8,7 +8,7 @@
 [![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
 [![SwiftUI + AppKit](https://img.shields.io/badge/UI-SwiftUI%20%2B%20AppKit-2563EB)](https://developer.apple.com/xcode/swiftui/)
 [![AdventureX 2026](https://img.shields.io/badge/AdventureX-2026-F59E0B)](#adventurex-2026)
-[![Download](https://img.shields.io/badge/Download-v0.1.0%20Beta-2563EB?logo=github)](https://github.com/Linus-Shyu/Luma-Bar-Download/releases/latest)
+[![Download](https://img.shields.io/badge/Download-v0.2.0%20Beta-2563EB?logo=github)](https://github.com/Linus-Shyu/Luma-Bar-Download/releases/latest)
 
 Luma Bar is a native macOS Dynamic Island built around the MacBook camera notch. It combines music playback, a context-aware local agent, voice input, task notifications, system controls, and a small desktop pet in one lightweight interface.
 

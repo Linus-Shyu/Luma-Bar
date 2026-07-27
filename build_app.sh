@@ -4,6 +4,31 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
+SECRETS="$ROOT/Sources/LumaBar/BundledAgentSecrets.swift"
+SECRETS_EXAMPLE="$ROOT/Support/Templates/BundledAgentSecrets.example.swift"
+if [[ ! -f "$SECRETS" && -f "$SECRETS_EXAMPLE" ]]; then
+  cp "$SECRETS_EXAMPLE" "$SECRETS"
+fi
+# Prefer build-time env injection for distribution without editing source.
+if [[ -n "${LUMA_BAR_DEEPSEEK_API_KEY:-}" ]]; then
+  python3 - "$SECRETS" <<'PY'
+import pathlib, re, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+key = __import__("os").environ.get("LUMA_BAR_DEEPSEEK_API_KEY", "").replace("\\", "\\\\").replace("\"", "\\\"")
+text, n = re.subn(
+    r'static let deepSeekAPIKey = ".*"',
+    f'static let deepSeekAPIKey = "{key}"',
+    text,
+    count=1,
+)
+if n != 1:
+    raise SystemExit("failed to inject LUMA_BAR_DEEPSEEK_API_KEY into BundledAgentSecrets.swift")
+path.write_text(text)
+print("Injected LUMA_BAR_DEEPSEEK_API_KEY into BundledAgentSecrets.swift")
+PY
+fi
+
 APP="$ROOT/luma bar.app"
 SIGN_IDENTITY="${LUMA_BAR_CODESIGN_IDENTITY:-}"
 BUILD_UNIVERSAL="${LUMA_BAR_BUILD_UNIVERSAL:-1}"
@@ -39,6 +64,10 @@ fi
 cp "$ROOT/Support/Info.plist" "$APP/Contents/Info.plist"
 if [[ -d "$ROOT/Support/Assets" ]]; then
   cp -R "$ROOT/Support/Assets/." "$APP/Contents/Resources/"
+fi
+if [[ -d "$ROOT/Support/Fonts" ]]; then
+  mkdir -p "$APP/Contents/Resources/Fonts"
+  cp -R "$ROOT/Support/Fonts/." "$APP/Contents/Resources/Fonts/"
 fi
 chmod +x "$APP/Contents/MacOS/LumaBar"
 /usr/bin/xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true

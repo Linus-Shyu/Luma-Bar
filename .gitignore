@@ -7,3 +7,4 @@ work/
 .env
 .env.*
 DerivedData/
+Sources/LumaBar/BundledAgentSecrets.swift
