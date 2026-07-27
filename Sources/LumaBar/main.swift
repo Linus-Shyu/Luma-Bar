@@ -5810,6 +5810,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     private var statusPixelConsoleThemeMenuItem: NSMenuItem?
     private var statusPixelCatThemeMenuItem: NSMenuItem?
     private var statusSelectionTranslationMenuItem: NSMenuItem?
+    private var statusLicenseMenuItem: NSMenuItem?
     private var permissionWindow: NSWindow?
     private var permissionOnboardingModel: PermissionOnboardingModel?
     private var visibilityTimer: Timer?
@@ -6531,7 +6532,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     private func shouldSuppressSelectionTranslationForFrontmostApplication() -> Bool {
-        guard model.isSelectionTranslationEnabled,
+        guard model.isProActive,
+              model.isSelectionTranslationEnabled,
               let application = NSWorkspace.shared.frontmostApplication,
               application.processIdentifier != NSRunningApplication.current.processIdentifier
         else {
@@ -8139,6 +8141,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         menu.addItem(selectionItem)
         statusSelectionTranslationMenuItem = selectionItem
 
+        let licenseItem = NSMenuItem(
+            title: model.licenseStatus.menuTitle,
+            action: #selector(showLicenseFromMenu),
+            keyEquivalent: ""
+        )
+        licenseItem.target = self
+        menu.addItem(licenseItem)
+        statusLicenseMenuItem = licenseItem
+
         let accessibilityItem = NSMenuItem(
             title: "Allow Accessibility Access",
             action: #selector(requestAccessibilityAccessFromMenu),
@@ -8219,7 +8230,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     @objc private func toggleSelectionTranslation() {
+        if !model.isProActive {
+            model.presentProUpgradePrompt(feature: "划词翻译")
+            model.showAgent()
+            model.isExpanded = true
+            return
+        }
         model.isSelectionTranslationEnabled.toggle()
+    }
+
+    @objc private func showLicenseFromMenu() {
+        presentLicensePanel()
+    }
+
+    private func presentLicensePanel() {
+        model.refreshLicenseStatus()
+        let status = model.licenseStatus
+        let alert = NSAlert()
+        alert.messageText = "Luma Bar 许可证"
+        alert.informativeText = status.summary
+            + "\n\nPro：¥28 / ¥45 / ¥68（1/3/5 台，含 12 个月更新）\n续费：¥18 / ¥28 / ¥45"
+        alert.alertStyle = .informational
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        field.placeholderString = "粘贴许可证密钥 LB1...."
+        if let key = status.record?.key {
+            field.stringValue = key
+        }
+        alert.accessoryView = field
+
+        alert.addButton(withTitle: "激活")
+        alert.addButton(withTitle: "购买 Pro")
+        let hasLicense = status.record != nil
+        if hasLicense {
+            alert.addButton(withTitle: "停用此 Mac")
+        }
+        alert.addButton(withTitle: "关闭")
+
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            do {
+                _ = try model.activateLicense(key: field.stringValue)
+                let done = NSAlert()
+                done.messageText = "激活成功"
+                done.informativeText = model.licenseStatus.summary
+                done.runModal()
+                rebuildStatusMenuTitles()
+            } catch {
+                let fail = NSAlert()
+                fail.messageText = "激活失败"
+                fail.informativeText = error.localizedDescription
+                fail.runModal()
+            }
+        } else if response == .alertSecondButtonReturn {
+            NSWorkspace.shared.open(LumaLicenseSecrets.purchaseURL)
+        } else if hasLicense, response == .alertThirdButtonReturn {
+            model.deactivateLicense()
+            rebuildStatusMenuTitles()
+        }
+    }
+
+    private func rebuildStatusMenuTitles() {
+        model.refreshLicenseStatus()
+        statusLicenseMenuItem?.title = model.licenseStatus.menuTitle
+        selectionTranslationMenuItem?.state = model.isSelectionTranslationEnabled ? .on : .off
+        statusSelectionTranslationMenuItem?.state = model.isSelectionTranslationEnabled ? .on : .off
     }
 
     @objc private func requestAccessibilityAccessFromMenu() {
@@ -8985,6 +9061,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             )
         }
     }
+    @Published private(set) var licenseStatus: LumaLicenseStatus = LumaLicenseManager.currentStatus()
     @Published var tracks: [LocalTrack] = []
     @Published var currentIndex = 0
     @Published var isPlaying = false
@@ -9155,6 +9232,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         super.init()
         AgentCredentialStore.clearKeychainOverrideIfBundled()
         agentHasAPIKey = AgentCredentialStore.currentAPIKey() != nil
+        _ = LumaLicenseManager.ensureTrialStarted()
+        licenseStatus = LumaLicenseManager.currentStatus()
         refreshSystemMetrics(force: true)
         refreshPetWeatherIfNeeded(now: Date())
         timer = Timer.scheduledTimer(
@@ -9164,6 +9243,41 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             userInfo: nil,
             repeats: true
         )
+    }
+
+    var isProActive: Bool {
+        licenseStatus.isProActive
+    }
+
+    func refreshLicenseStatus() {
+        licenseStatus = LumaLicenseManager.currentStatus()
+    }
+
+    @discardableResult
+    func activateLicense(key: String) throws -> LumaLicenseRecord {
+        let record = try LumaLicenseManager.activate(key: key)
+        refreshLicenseStatus()
+        return record
+    }
+
+    func deactivateLicense() {
+        LumaLicenseManager.deactivate()
+        refreshLicenseStatus()
+    }
+
+    func presentProUpgradePrompt(feature: String) {
+        let message: String
+        switch licenseStatus.phase {
+        case .free:
+            message = "「\(feature)」需要 Pro。试用已结束，¥28 起即可解锁。"
+        case .trial:
+            message = "「\(feature)」属于 Pro 能力（试用期内应可用）。请更新许可证状态后重试。"
+        case .pro:
+            message = "「\(feature)」暂时不可用。"
+        }
+        agentStatus = "Pro"
+        agentResponse = message + "\n\n菜单栏胶囊 → 许可证… 可激活或前往购买。"
+        requestDesktopPetMessage?("升级 Pro 就能用\(feature)啦。")
     }
 
     var currentTrack: LocalTrack? {
@@ -12236,6 +12350,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     private func refreshExternalTaskStates(force: Bool) {
+        guard isProActive else { return }
         let now = Date()
         guard force || now.timeIntervalSince(lastExternalTaskRefreshDate) >= 0.75 else { return }
         guard !isRefreshingExternalTaskStates else { return }
@@ -12278,6 +12393,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     private func presentTaskCompletionNotice(for state: ExternalTaskState) {
+        guard isProActive else { return }
         if wechatMessageNotice != nil {
             let identity = "\(state.source.rawValue):\(state.sessionID):\(state.updatedAt.timeIntervalSince1970)"
             let isAlreadyQueued = pendingTaskCompletionStates.contains {
@@ -12524,6 +12640,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     private func presentWeChatMessageNotice(state: WeChatUnreadState) {
+        guard isProActive else { return }
         if taskCompletionNotice != nil || wechatMessageNotice != nil {
             pendingWeChatUnreadStates = [state]
             return
@@ -12615,6 +12732,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         endCodexTokenAutoExpansion()
         activeMode = .agent
         refreshAgentKeyStatus()
+        if !isProActive {
+            presentProUpgradePrompt(feature: "Agent")
+        }
     }
 
     func refreshAgentKeyStatus() {
@@ -13030,6 +13150,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     func submitAgentPrompt() {
+        guard isProActive else {
+            presentProUpgradePrompt(feature: "Agent")
+            return
+        }
         let prompt = agentInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return }
         isSelectionTranslationActive = false
@@ -14933,7 +15057,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
 
         refreshExternalTaskStates(force: false)
-        refreshWeChatUnread(force: false)
+        if isProActive {
+            refreshWeChatUnread(force: false)
+        }
         refreshSystemMetrics(force: false)
         refreshNetEaseNowPlaying(force: false)
         updateDesktopPetMood(now: tickDate)
