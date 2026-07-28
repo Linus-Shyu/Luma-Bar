@@ -21,6 +21,10 @@ STAGE="$OUT_DIR/stage"
 IDENTITY="${LUMA_BAR_CODESIGN_IDENTITY:-}"
 NOTARY_PROFILE="${LUMA_BAR_NOTARY_PROFILE:-}"
 
+if [[ -z "$IDENTITY" ]]; then
+  IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/Developer ID Application:/ { print $2; exit }')"
+fi
+
 mkdir -p "$OUT_DIR"
 rm -rf "$STAGE" "$OUT_DIR/$DMG_NAME" "$OUT_DIR/$APP_NAME"
 mkdir -p "$STAGE"
