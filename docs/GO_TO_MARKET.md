@@ -9,7 +9,7 @@
 ### 1. 确认 App 里已有售卖骨架（已完成）
 - 首次启动自动开始 **14 天全功能试用**
 - 菜单栏胶囊 → **许可证…**：激活 / 购买 / 停用
-- 试用结束未激活 → Free（刘海等基础可用；微信提醒、任务完成、划词、Agent 锁定）
+- 试用结束未激活 → Free（刘海等基础可用；任务完成、划词、Agent 锁定）
 
 ### 2. 签发一把测试 License
 ```bash
@@ -54,7 +54,7 @@ LUMA_BAR_CODESIGN_IDENTITY="Developer ID Application: Faxin Xu (2DZ36MCTK5)" \
 LUMA_BAR_NOTARY_PROFILE="luma-notary" \
 ./scripts/make_release_dmg.sh
 ```
-4. 把 `dist/Luma-Bar-v0.2.0.dmg` 上传到 [Luma-Bar-Download](https://github.com/Linus-Shyu/Luma-Bar-Download) 新建 `v0.2.0` Release
+4. 把 `dist/Luma-Bar-v0.2.1.dmg` 上传到 [Luma-Bar-Download](https://github.com/Linus-Shyu/Luma-Bar-Download) 新建 `v0.2.1` Release
 
 没有 Developer ID 之前：只能「右键打开」内测，**不要正式卖**。
 
@@ -97,7 +97,7 @@ LUMA_BAR_NOTARY_PROFILE="luma-notary" \
 - [ ] 公开包**不含** DeepSeek 真 Key  
 - [ ] Developer ID + 公证 DMG  
 - [ ] Release 说明含权限指引（辅助功能等）  
-- [ ] 自己走通：试用 → 购买 → 激活 → 微信/完成提醒可用  
+- [ ] 自己走通：试用 → 购买 → 激活 → 完成提醒可用  
 
 ---
 

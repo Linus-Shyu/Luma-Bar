@@ -8,7 +8,7 @@
 [![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
 [![SwiftUI + AppKit](https://img.shields.io/badge/UI-SwiftUI%20%2B%20AppKit-2563EB)](https://developer.apple.com/xcode/swiftui/)
 [![AdventureX 2026](https://img.shields.io/badge/AdventureX-2026-F59E0B)](#adventurex-2026)
-[![下载](https://img.shields.io/badge/下载-v0.2.0%20Beta-2563EB?logo=github)](https://github.com/Linus-Shyu/Luma-Bar-Download/releases/latest)
+[![下载](https://img.shields.io/badge/下载-v0.2.1%20Beta-2563EB?logo=github)](https://github.com/Linus-Shyu/Luma-Bar-Download/releases/latest)
 
 Luma Bar 是一款围绕 MacBook 摄像头刘海打造的原生 macOS 灵动岛。它将音乐播放、上下文感知本地 Agent、语音输入、任务完成提醒、系统控制和桌面宠物整合进一个轻量界面。
 

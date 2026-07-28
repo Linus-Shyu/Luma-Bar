@@ -76,7 +76,7 @@ struct LumaLicenseStatus: Equatable, Sendable {
             formatter.locale = Locale(identifier: "zh_CN")
             return "Pro 已激活（\(devices) 台）。维护更新至 \(formatter.string(from: expiry))。"
         case .free:
-            return "试用已结束。升级 Pro（¥28 起）解锁微信提醒、任务完成提醒、划词翻译与 Agent。"
+            return "试用已结束。升级 Pro（¥28 起）解锁任务完成提醒、划词翻译与 Agent。"
         }
     }
 }

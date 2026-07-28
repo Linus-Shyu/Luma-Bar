@@ -185,8 +185,6 @@ enum IslandPanelAction {
     case togglePlayback
     case nextTrack
     case openAgent
-    case openWeChatFromNotice
-    case dismissWeChatNotice
     case agentQuickAction(AgentQuickActionKind)
 }
 
@@ -1435,306 +1433,6 @@ fileprivate struct TaskCompletionNotice: Identifiable, Equatable {
     let completedAt: Date
 }
 
-fileprivate struct WeChatMessageNotice: Identifiable, Equatable {
-    let id: String
-    let unreadCount: Int
-    let title: String
-    let presentedAt: Date
-
-    static func make(badgeCount: Int?) -> WeChatMessageNotice {
-        if let badgeCount, badgeCount > 0 {
-            return WeChatMessageNotice(
-                id: "wechat:badge:\(badgeCount):\(Date().timeIntervalSince1970)",
-                unreadCount: badgeCount,
-                title: "微信 · \(badgeCount) 条新消息",
-                presentedAt: Date()
-            )
-        }
-        return WeChatMessageNotice(
-            id: "wechat:new:\(Date().timeIntervalSince1970)",
-            unreadCount: 1,
-            title: "微信 · 有新消息",
-            presentedAt: Date()
-        )
-    }
-}
-
-private struct WeChatUnreadState: Equatable, Sendable {
-    /// Dock unread badge count (0 = none / unavailable).
-    let badgeCount: Int
-    /// Latest content mtime across message/session DB files (nanoseconds).
-    /// Prefer this over byte size — SQLite WAL checkpoints can shrink files.
-    let activityMTimeNs: UInt64
-    /// Combined size of watched DB files (secondary signal).
-    let storeBytes: Int
-}
-
-/// Detects WeChat unread activity via Dock badge + local DB/session mtime.
-private enum WeChatUnreadObserver {
-    static let bundleIdentifiers: Set<String> = [
-        "com.tencent.xinWeChat",
-        "com.tencent.WeChat"
-    ]
-
-    private static let dockTitles: Set<String> = [
-        "wechat", "weixin", "微信"
-    ]
-
-    /// `nil` = WeChat not running.
-    /// - Parameter includeDockBadge: Dock AX walks are slow; skip on FS-watch hot path.
-    static func unreadState(includeDockBadge: Bool = true) -> WeChatUnreadState? {
-        guard isWeChatRunning else { return nil }
-        let badge: Int
-        if includeDockBadge, AXIsProcessTrusted() {
-            badge = dockBadgeCount() ?? 0
-        } else {
-            badge = 0
-        }
-        let fingerprint = activityFingerprint()
-        return WeChatUnreadState(
-            badgeCount: badge,
-            activityMTimeNs: fingerprint.mtimeNs,
-            storeBytes: fingerprint.bytes
-        )
-    }
-
-    static var isWeChatRunning: Bool {
-        NSWorkspace.shared.runningApplications.contains { app in
-            guard let bundleIdentifier = app.bundleIdentifier else { return false }
-            return bundleIdentifiers.contains(bundleIdentifier)
-        }
-    }
-
-    static var isWeChatFrontmost: Bool {
-        guard let bundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
-            return false
-        }
-        return bundleIdentifiers.contains(bundleIdentifier)
-    }
-
-    static func activateWeChat() {
-        if let running = NSWorkspace.shared.runningApplications.first(where: { app in
-            guard let bundleIdentifier = app.bundleIdentifier else { return false }
-            return bundleIdentifiers.contains(bundleIdentifier)
-        }) {
-            running.activate(options: [.activateAllWindows])
-            return
-        }
-
-        for bundleID in ["com.tencent.xinWeChat", "com.tencent.WeChat"] {
-            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-                let configuration = NSWorkspace.OpenConfiguration()
-                configuration.activates = true
-                NSWorkspace.shared.openApplication(at: url, configuration: configuration)
-                return
-            }
-        }
-    }
-
-    /// Watch `db_storage` roots so message/session writes both wake us.
-    static func activityWatchDirectories() -> [URL] {
-        accountDirectories().compactMap { accountDir in
-            let storage = accountDir.appendingPathComponent("db_storage")
-            return FileManager.default.fileExists(atPath: storage.path) ? storage : nil
-        }
-    }
-
-    /// Concrete files that change when a chat updates.
-    static func activityWatchFiles() -> [URL] {
-        activityFiles()
-    }
-
-    private static func accountDirectories() -> [URL] {
-        let root = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files")
-        guard
-            let accountDirs = try? FileManager.default.contentsOfDirectory(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles]
-            )
-        else {
-            return []
-        }
-        return accountDirs.filter { dir in
-            let name = dir.lastPathComponent
-            if name == "Backup" || name == "WMPF" || name == "all_users" { return false }
-            return FileManager.default.fileExists(
-                atPath: dir.appendingPathComponent("db_storage").path
-            )
-        }
-    }
-
-    private static func activityFiles() -> [URL] {
-        var files: [URL] = []
-        for accountDir in accountDirectories() {
-            let messageDir = accountDir.appendingPathComponent("db_storage/message")
-            let sessionDir = accountDir.appendingPathComponent("db_storage/session")
-            files.append(contentsOf: messageActivityFiles(in: messageDir))
-            files.append(contentsOf: sessionActivityFiles(in: sessionDir))
-        }
-        return files
-    }
-
-    private static func messageActivityFiles(in directory: URL) -> [URL] {
-        guard
-            let contents = try? FileManager.default.contentsOfDirectory(
-                at: directory,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            )
-        else {
-            return []
-        }
-        return contents.filter { file in
-            let name = file.lastPathComponent
-            if name.contains("fts") || name.contains("resource")
-                || name.contains("media") || name.contains("biz_")
-            {
-                return false
-            }
-            if name.hasPrefix("message_"), name.hasSuffix(".db") || name.hasSuffix(".db-wal") {
-                return true
-            }
-            // Touched on activity even when WAL size shrinks after checkpoint.
-            if name.hasPrefix("message_"), name.contains(".material") {
-                return true
-            }
-            return false
-        }
-    }
-
-    private static func sessionActivityFiles(in directory: URL) -> [URL] {
-        guard
-            let contents = try? FileManager.default.contentsOfDirectory(
-                at: directory,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            )
-        else {
-            return []
-        }
-        return contents.filter { file in
-            let name = file.lastPathComponent
-            return name.hasPrefix("session")
-                && (name.hasSuffix(".db")
-                    || name.hasSuffix(".db-wal")
-                    || name.contains(".material"))
-        }
-    }
-
-    private static func activityFingerprint() -> (mtimeNs: UInt64, bytes: Int) {
-        var maxMTimeNs: UInt64 = 0
-        var totalBytes = 0
-        for file in activityFiles() {
-            guard
-                let values = try? file.resourceValues(
-                    forKeys: [.contentModificationDateKey, .fileSizeKey]
-                )
-            else {
-                continue
-            }
-            if let date = values.contentModificationDate {
-                let ns = UInt64(max(0, date.timeIntervalSince1970) * 1_000_000_000)
-                maxMTimeNs = max(maxMTimeNs, ns)
-            }
-            if let size = values.fileSize {
-                totalBytes += size
-            }
-        }
-        return (maxMTimeNs, totalBytes)
-    }
-
-    private static func dockBadgeCount() -> Int? {
-        guard let dockPID = NSWorkspace.shared.runningApplications
-            .first(where: { $0.bundleIdentifier == "com.apple.dock" })?
-            .processIdentifier
-        else {
-            return 0
-        }
-        let dockApp = AXUIElementCreateApplication(dockPID)
-        if let count = findWeChatBadge(in: dockApp, depth: 0) {
-            return count
-        }
-        return 0
-    }
-
-    private static func findWeChatBadge(in element: AXUIElement, depth: Int) -> Int? {
-        guard depth < 6 else { return nil }
-        if matchesWeChatDockTile(element) {
-            return parseBadge(statusLabel(of: element))
-        }
-        guard let children = copyChildren(of: element) else { return nil }
-        for child in children {
-            if let count = findWeChatBadge(in: child, depth: depth + 1) {
-                return count
-            }
-        }
-        return nil
-    }
-
-    private static func matchesWeChatDockTile(_ element: AXUIElement) -> Bool {
-        let title = (attributeString(element, kAXTitleAttribute as String) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        if dockTitles.contains(title) {
-            return true
-        }
-
-        let description = (attributeString(element, kAXDescriptionAttribute as String) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        if dockTitles.contains(where: { description.contains($0) }) {
-            return true
-        }
-
-        if let urlString = attributeString(element, kAXURLAttribute as String)?.lowercased() {
-            if urlString.contains("wechat") || urlString.contains("xinwechat") {
-                return true
-            }
-        }
-        return false
-    }
-
-    private static func statusLabel(of element: AXUIElement) -> String? {
-        attributeString(element, "AXStatusLabel")
-    }
-
-    private static func parseBadge(_ raw: String?) -> Int {
-        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
-            return 0
-        }
-        if raw.hasSuffix("+"), let value = Int(raw.dropLast()) {
-            return value
-        }
-        if let value = Int(raw) {
-            return value
-        }
-        let digits = raw.filter(\.isNumber)
-        return Int(digits) ?? 0
-    }
-
-    private static func copyChildren(of element: AXUIElement) -> [AXUIElement]? {
-        var value: CFTypeRef?
-        let status = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value)
-        guard status == .success, let array = value as? [AXUIElement] else { return nil }
-        return array
-    }
-
-    private static func attributeString(_ element: AXUIElement, _ attribute: String) -> String? {
-        var value: CFTypeRef?
-        let status = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
-        guard status == .success else { return nil }
-        if let string = value as? String {
-            return string
-        }
-        if let number = value as? NSNumber {
-            return number.stringValue
-        }
-        return nil
-    }
-}
-
 private struct CodexTokenUsageSnapshot: Equatable, Sendable {
     let source: ExternalTokenSource
     let usage: AgentTokenUsage
@@ -1743,6 +1441,7 @@ private struct CodexTokenUsageSnapshot: Equatable, Sendable {
     let sessionURL: URL
     let updatedAt: Date
     let kiroCredits: KiroCreditsUsage?
+    let weeklyQuota: CodexWeeklyQuota?
 
     init(
         source: ExternalTokenSource,
@@ -1751,7 +1450,8 @@ private struct CodexTokenUsageSnapshot: Equatable, Sendable {
         model: String?,
         sessionURL: URL,
         updatedAt: Date,
-        kiroCredits: KiroCreditsUsage? = nil
+        kiroCredits: KiroCreditsUsage? = nil,
+        weeklyQuota: CodexWeeklyQuota? = nil
     ) {
         self.source = source
         self.usage = usage
@@ -1760,6 +1460,56 @@ private struct CodexTokenUsageSnapshot: Equatable, Sendable {
         self.sessionURL = sessionURL
         self.updatedAt = updatedAt
         self.kiroCredits = kiroCredits
+        self.weeklyQuota = weeklyQuota
+    }
+}
+
+/// ChatGPT / Codex plan window (account menu「剩余用量」).
+private struct CodexWeeklyQuota: Equatable, Sendable {
+    /// Used percent 0...100 from Codex `secondary.used_percent`.
+    let usedPercent: Double
+    let resetDate: Date?
+    let planType: String?
+    let windowMinutes: Int?
+
+    var remainingPercent: Double {
+        min(100, max(0, 100 - usedPercent))
+    }
+
+    /// Progress bar = used share of weekly quota.
+    var progress: Double {
+        min(1, max(0, usedPercent / 100))
+    }
+
+    var remainingPercentText: String {
+        "\(Int(remainingPercent.rounded()))%"
+    }
+
+    var usedPercentText: String {
+        "\(Int(usedPercent.rounded()))%"
+    }
+
+    var resetLabel: String? {
+        guard let resetDate else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日"
+        return "\(formatter.string(from: resetDate))重置"
+    }
+
+    var windowLabel: String {
+        if let windowMinutes, windowMinutes >= 6 * 24 * 60 {
+            return "1 周"
+        }
+        if let windowMinutes, windowMinutes >= 24 * 60 {
+            let days = max(1, Int((Double(windowMinutes) / (24 * 60)).rounded()))
+            return "\(days) 天"
+        }
+        if let windowMinutes, windowMinutes > 0 {
+            let hours = max(1, Int((Double(windowMinutes) / 60).rounded()))
+            return "\(hours) 小时"
+        }
+        return "周额度"
     }
 }
 
@@ -2113,7 +1863,192 @@ private enum CodexSessionUsageReader {
             contextWindow: max(1_000, info.modelContextWindow),
             model: model,
             sessionURL: url,
-            updatedAt: modifiedAt
+            updatedAt: modifiedAt,
+            weeklyQuota: weeklyQuota(
+                from: tokenEvent.payload.rateLimits,
+                previous: previous
+            )
+        )
+    }
+
+    private final class WeeklyScanState: @unchecked Sendable {
+        let lock = NSLock()
+        var didExhaust = false
+    }
+
+    private static let weeklyScanState = WeeklyScanState()
+
+    private static func weeklyQuota(
+        from rateLimits: CodexRolloutEvent.RateLimits?,
+        previous: CodexTokenUsageSnapshot?
+    ) -> CodexWeeklyQuota? {
+        if let quota = weeklyQuota(from: rateLimits) {
+            weeklyScanState.lock.lock()
+            weeklyScanState.didExhaust = false
+            weeklyScanState.lock.unlock()
+            persistWeeklyQuotaCache(quota)
+            return quota
+        }
+        if let cached = previous?.weeklyQuota ?? loadWeeklyQuotaCache() {
+            return cached
+        }
+        // Avoid re-scanning dozens of rollouts every poll when none contain rate_limits.
+        weeklyScanState.lock.lock()
+        let alreadyScanned = weeklyScanState.didExhaust
+        weeklyScanState.lock.unlock()
+        guard !alreadyScanned else { return nil }
+        if let scanned = latestWeeklyQuotaAcrossSessions() {
+            weeklyScanState.lock.lock()
+            weeklyScanState.didExhaust = false
+            weeklyScanState.lock.unlock()
+            return scanned
+        }
+        weeklyScanState.lock.lock()
+        weeklyScanState.didExhaust = true
+        weeklyScanState.lock.unlock()
+        return nil
+    }
+
+    private static func weeklyQuota(
+        from rateLimits: CodexRolloutEvent.RateLimits?
+    ) -> CodexWeeklyQuota? {
+        guard let rateLimits else { return nil }
+        // Prefer secondary (~weekly). Fall back to primary if that's all we have.
+        let window = rateLimits.secondary ?? rateLimits.primary
+        guard let window, let used = window.usedPercent else { return nil }
+
+        let resetDate: Date?
+        if let resetsAt = window.resetsAt {
+            resetDate = Date(timeIntervalSince1970: resetsAt)
+        } else if let resetsIn = window.resetsInSeconds {
+            resetDate = Date().addingTimeInterval(resetsIn)
+        } else {
+            resetDate = nil
+        }
+
+        return CodexWeeklyQuota(
+            usedPercent: min(100, max(0, used)),
+            resetDate: resetDate,
+            planType: rateLimits.planType,
+            windowMinutes: window.windowMinutes
+        )
+    }
+
+    private static func latestWeeklyQuotaAcrossSessions() -> CodexWeeklyQuota? {
+        let fileManager = FileManager.default
+        let resourceKeys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey]
+        var files: [(url: URL, modifiedAt: Date)] = []
+        for sessionsRoot in sessionRoots() {
+            guard let enumerator = fileManager.enumerator(
+                at: sessionsRoot,
+                includingPropertiesForKeys: Array(resourceKeys),
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else {
+                continue
+            }
+            for case let url as URL in enumerator where url.pathExtension == "jsonl" {
+                guard
+                    let values = try? url.resourceValues(forKeys: resourceKeys),
+                    values.isRegularFile == true,
+                    let modifiedAt = values.contentModificationDate
+                else {
+                    continue
+                }
+                files.append((url, modifiedAt))
+            }
+        }
+
+        for file in files.sorted(by: { $0.modifiedAt > $1.modifiedAt }).prefix(24) {
+            if let quota = weeklyQuota(inTailOf: file.url) {
+                persistWeeklyQuotaCache(quota)
+                return quota
+            }
+        }
+        return nil
+    }
+
+    private static func weeklyQuota(inTailOf url: URL) -> CodexWeeklyQuota? {
+        guard
+            let fileHandle = try? FileHandle(forReadingFrom: url),
+            let fileSize = try? fileHandle.seekToEnd()
+        else {
+            return nil
+        }
+        defer { try? fileHandle.close() }
+
+        let requestedSize = min(UInt64(initialTailSize), fileSize)
+        do {
+            try fileHandle.seek(toOffset: fileSize - requestedSize)
+            let data = try fileHandle.read(upToCount: Int(requestedSize)) ?? Data()
+            let text = String(decoding: data, as: UTF8.self)
+            // Walk newest → oldest token_count lines looking for non-null secondary/primary.
+            var search = text.endIndex
+            while search > text.startIndex {
+                guard let markerRange = text[..<search].range(of: tokenMarker, options: .backwards) else {
+                    break
+                }
+                let lineStart = text[..<markerRange.lowerBound].lastIndex(of: "\n")
+                    .map { text.index(after: $0) } ?? text.startIndex
+                let lineEnd = text[markerRange.upperBound...].firstIndex(of: "\n") ?? text.endIndex
+                let line = text[lineStart..<lineEnd]
+                search = markerRange.lowerBound
+                guard
+                    let lineData = String(line).data(using: .utf8),
+                    let event = try? JSONDecoder().decode(CodexRolloutEvent.self, from: lineData),
+                    let quota = weeklyQuota(from: event.payload.rateLimits)
+                else {
+                    continue
+                }
+                return quota
+            }
+        } catch {
+            return nil
+        }
+        return nil
+    }
+
+    private static var weeklyQuotaCacheURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/LumaBar", isDirectory: true)
+            .appendingPathComponent("codex-weekly-quota.json")
+    }
+
+    private static func persistWeeklyQuotaCache(_ quota: CodexWeeklyQuota) {
+        let directory = weeklyQuotaCacheURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let payload: [String: Any] = [
+            "usedPercent": quota.usedPercent,
+            "resetAt": quota.resetDate?.timeIntervalSince1970 as Any,
+            "planType": quota.planType as Any,
+            "windowMinutes": quota.windowMinutes as Any,
+            "cachedAt": Date().timeIntervalSince1970
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]) else {
+            return
+        }
+        try? data.write(to: weeklyQuotaCacheURL, options: [.atomic])
+    }
+
+    private static func loadWeeklyQuotaCache() -> CodexWeeklyQuota? {
+        guard
+            let data = try? Data(contentsOf: weeklyQuotaCacheURL),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let used = json["usedPercent"] as? Double
+        else {
+            return nil
+        }
+        // Drop cache older than 36h — weekly numbers move.
+        if let cachedAt = json["cachedAt"] as? Double,
+           Date().timeIntervalSince1970 - cachedAt > 36 * 3600
+        {
+            return nil
+        }
+        let resetDate = (json["resetAt"] as? Double).map { Date(timeIntervalSince1970: $0) }
+        return CodexWeeklyQuota(
+            usedPercent: used,
+            resetDate: resetDate,
+            planType: json["planType"] as? String,
+            windowMinutes: json["windowMinutes"] as? Int
         )
     }
 
@@ -3081,6 +3016,13 @@ private struct CodexRolloutEvent: Decodable {
     struct Payload: Decodable {
         let info: TokenInfo?
         let model: String?
+        let rateLimits: RateLimits?
+
+        enum CodingKeys: String, CodingKey {
+            case info
+            case model
+            case rateLimits = "rate_limits"
+        }
     }
 
     struct TokenInfo: Decodable {
@@ -3104,6 +3046,72 @@ private struct CodexRolloutEvent: Decodable {
             case inputTokens = "input_tokens"
             case outputTokens = "output_tokens"
             case totalTokens = "total_tokens"
+        }
+    }
+
+    struct RateLimits: Decodable {
+        let primary: Window?
+        let secondary: Window?
+        let planType: String?
+
+        enum CodingKeys: String, CodingKey {
+            case primary
+            case secondary
+            case planType = "plan_type"
+        }
+    }
+
+    struct Window: Decodable {
+        let usedPercent: Double?
+        let windowMinutes: Int?
+        let resetsAt: Double?
+        let resetsInSeconds: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case usedPercent = "used_percent"
+            case windowMinutes = "window_minutes"
+            case resetsAt = "resets_at"
+            case resetsInSeconds = "resets_in_seconds"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            usedPercent = Self.decodeFlexibleDouble(container, forKey: .usedPercent)
+            windowMinutes = Self.decodeFlexibleInt(container, forKey: .windowMinutes)
+            resetsAt = Self.decodeFlexibleDouble(container, forKey: .resetsAt)
+            resetsInSeconds = Self.decodeFlexibleDouble(container, forKey: .resetsInSeconds)
+        }
+
+        private static func decodeFlexibleDouble(
+            _ container: KeyedDecodingContainer<CodingKeys>,
+            forKey key: CodingKeys
+        ) -> Double? {
+            if let value = try? container.decodeIfPresent(Double.self, forKey: key) {
+                return value
+            }
+            if let value = try? container.decodeIfPresent(Int.self, forKey: key) {
+                return Double(value)
+            }
+            if let value = try? container.decodeIfPresent(String.self, forKey: key) {
+                return Double(value)
+            }
+            return nil
+        }
+
+        private static func decodeFlexibleInt(
+            _ container: KeyedDecodingContainer<CodingKeys>,
+            forKey key: CodingKeys
+        ) -> Int? {
+            if let value = try? container.decodeIfPresent(Int.self, forKey: key) {
+                return value
+            }
+            if let value = try? container.decodeIfPresent(Double.self, forKey: key) {
+                return Int(value.rounded())
+            }
+            if let value = try? container.decodeIfPresent(String.self, forKey: key) {
+                return Int(value)
+            }
+            return nil
         }
     }
 }
@@ -5866,10 +5874,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     private var expandedPanelSize: NSSize {
-        if model.taskCompletionNotice != nil || model.wechatMessageNotice != nil {
+        if model.taskCompletionNotice != nil {
             return NotchMetrics.codexTokenExpandedSize
         }
-        if model.isCodexTokenAutoExpanded, model.showsKiroCredits {
+        if model.isCodexTokenAutoExpanded, model.showsKiroCredits || model.showsCodexWeeklyQuota {
             return NotchMetrics.kiroTokenExpandedSize
         }
         return model.usesCompactExpandedOverlay
@@ -5910,16 +5918,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             self?.showDesktopPetMessage(message)
         }
         model.requestTaskCompletionPresentation = { [weak self] in
-            guard let self else { return false }
-            if self.isFrontmostApplicationFullScreen() {
-                self.showFullScreenCompletionToast()
-                return true
-            }
-            self.showExpandedPanel(animated: true)
-            self.refreshInteractiveHitRegions()
-            return false
-        }
-        model.requestWeChatMessagePresentation = { [weak self] in
             guard let self else { return false }
             if self.isFrontmostApplicationFullScreen() {
                 self.showFullScreenCompletionToast()
@@ -6002,6 +6000,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             .store(in: &cancellables)
 
         model.$showsKiroCreditsOverlay
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, self.model.isCodexTokenAutoExpanded else { return }
+                self.applyLayout()
+            }
+            .store(in: &cancellables)
+
+        model.$showsCodexWeeklyQuotaOverlay
             .removeDuplicates()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -7099,9 +7106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
     private func makeExpandedHostingView() -> NSView {
         let rootView = Group {
-            if model.wechatMessageNotice != nil {
-                WeChatMessageOverlayView(model: model)
-            } else if model.taskCompletionNotice != nil {
+            if model.taskCompletionNotice != nil {
                 TaskCompletionOverlayView(model: model)
             } else if model.isCodexTokenAutoExpanded {
                 CodexTokenOverlayView(model: model)
@@ -7372,14 +7377,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         )
 
         let rootView: AnyView
-        if let wechatNotice = model.wechatMessageNotice {
-            rootView = AnyView(
-                FullScreenWeChatMessageToastView(notice: wechatNotice)
-                    .frame(width: size.width, height: size.height)
-                    .environment(\.islandTheme, model.theme)
-                    .preferredColorScheme(model.theme.preferredColorScheme)
-            )
-        } else if let notice = model.taskCompletionNotice {
+        if let notice = model.taskCompletionNotice {
             rootView = AnyView(
                 FullScreenTaskCompletionToastView(notice: notice)
                     .frame(width: size.width, height: size.height)
@@ -7426,11 +7424,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
     private func hideFullScreenCompletionToast() {
         guard let window = fullScreenCompletionToastWindow, window.isVisible else {
-            if model.wechatMessageNotice != nil {
-                model.dismissWeChatMessageNotice()
-            } else {
-                model.dismissTaskCompletionNotice()
-            }
+            model.dismissTaskCompletionNotice()
             return
         }
         NSAnimationContext.runAnimationGroup { context in
@@ -7443,11 +7437,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                 window?.orderOut(nil)
                 window?.alphaValue = 1
                 self?.fullScreenCompletionToastDismissWorkItem = nil
-                if self?.model.wechatMessageNotice != nil {
-                    self?.model.dismissWeChatMessageNotice()
-                } else {
-                    self?.model.dismissTaskCompletionNotice()
-                }
+                self?.model.dismissTaskCompletionNotice()
             }
         }
     }
@@ -7541,7 +7531,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             return
         }
         guard model.taskCompletionNotice != nil
-            || model.wechatMessageNotice != nil
             || Date() >= suppressExpandedPanelUntil
         else {
             expandedWindow.orderOut(nil)
@@ -7641,10 +7630,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                 model.showAgent()
                 pinExpandedPanelFromUserClick(expandIfNeeded: true)
             }
-        case .openWeChatFromNotice:
-            model.openWeChatFromNotice()
-        case .dismissWeChatNotice:
-            model.dismissWeChatMessageNotice()
         case .agentQuickAction(let kind):
             if let expandedWindow {
                 activateForUserInteraction(panel: expandedWindow)
@@ -7712,20 +7697,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     private func expandedImmediateActions() -> [(rect: NSRect, action: IslandPanelAction)] {
-        if model.wechatMessageNotice != nil {
-            let size = expandedPanelSize
-            return [
-                (
-                    rect: NSRect(x: 0, y: 0, width: max(0, size.width - 52), height: size.height),
-                    action: .openWeChatFromNotice
-                ),
-                (
-                    rect: NSRect(x: size.width - 52, y: size.height - 52, width: 52, height: 52),
-                    action: .dismissWeChatNotice
-                )
-            ]
-        }
-
         guard model.activeMode == .agent else { return [] }
 
         let font = model.theme.isPixelStyled
@@ -8115,13 +8086,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         )
         testCursorCompletionItem.target = self
         menu.addItem(testCursorCompletionItem)
-        let testWeChatItem = NSMenuItem(
-            title: "测试微信消息提醒",
-            action: #selector(testWeChatMessageFromMenu),
-            keyEquivalent: ""
-        )
-        testWeChatItem.target = self
-        menu.addItem(testWeChatItem)
         let testContextLimitItem = NSMenuItem(
             title: "测试上下文极限提醒",
             action: #selector(testContextLimitFromMenu),
@@ -8192,13 +8156,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
     @objc private func testCursorCompletionFromMenu() {
         model.presentMultiTaskCompletionDemo()
-    }
-
-    @objc private func testWeChatMessageFromMenu() {
-        if !AXIsProcessTrusted() {
-            AgentContextProvider.requestAccessibilityAccess()
-        }
-        model.presentWeChatMessageTestNotice()
     }
 
     @objc private func testContextLimitFromMenu() {
@@ -9068,7 +9025,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     @Published var isExpanded = false
     @Published private(set) var isCodexTokenAutoExpanded = false
     @Published fileprivate var taskCompletionNotice: TaskCompletionNotice?
-    @Published fileprivate var wechatMessageNotice: WeChatMessageNotice?
     @Published var activeMode: IslandContentMode = .music
     @Published var activeAppContext: IslandAppContext = .general
     @Published var activeAppName = ""
@@ -9097,6 +9053,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
     @Published private var codexTokenUsage: CodexTokenUsageSnapshot?
     @Published private(set) var showsKiroCreditsOverlay = false
+    @Published private(set) var showsCodexWeeklyQuotaOverlay = false
     @Published var agentLiveEstimatedTokens = 0
     @Published var pendingAgentShellCommand: String?
     @Published fileprivate var pendingMessageAction: PendingMessageAction?
@@ -9127,7 +9084,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     var requestExpandedPanelDismissal: (() -> Void)?
     var requestDesktopPetMessage: ((String) -> Void)?
     var requestTaskCompletionPresentation: (() -> Bool)?
-    var requestWeChatMessagePresentation: (() -> Bool)?
 
     private var audioPlayer: AVAudioPlayer?
     private lazy var voiceSpeechRecognizer: SFSpeechRecognizer? = {
@@ -9190,23 +9146,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     private var pendingTaskCompletionStates: [ExternalTaskState] = []
     private var taskCompletionDismissWorkItem: DispatchWorkItem?
     private let externalTaskObservationStartedAt = Date()
-    private var lastWeChatUnreadCount: Int?
-    private var lastWeChatActivityMTimeNs: UInt64 = 0
-    private var lastWeChatNotifiedMTimeNs: UInt64 = 0
-    private var hasSeededWeChatUnread = false
-    private var lastWeChatUnreadRefreshDate = Date.distantPast
-    private var lastWeChatNoticeAt = Date.distantPast
-    private var lastWeChatWatcherRefreshDate = Date.distantPast
-    private var pendingWeChatUnreadStates: [WeChatUnreadState] = []
-    private var wechatMessageDismissWorkItem: DispatchWorkItem?
-    private var wechatFileWatchSources: [DispatchSourceFileSystemObject] = []
-    private var wechatFileWatchDebounceWorkItem: DispatchWorkItem?
-    private var wechatFileWatchActive = false
-    private var wechatBurstRefreshWorkItems: [DispatchWorkItem] = []
-    /// Coalesce multi-stage DB flushes into one banner.
-    private let wechatNoticeCooldown: TimeInterval = 0.85
-    private let wechatUnreadPollInterval: TimeInterval = 0.05
-    private let wechatWatcherRefreshInterval: TimeInterval = 20
     private var agentModelName: String {
         AgentModelProvider.current.defaultModel
     }
@@ -9303,11 +9242,15 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var usesCompactExpandedOverlay: Bool {
-        isCodexTokenAutoExpanded || taskCompletionNotice != nil || wechatMessageNotice != nil
+        isCodexTokenAutoExpanded || taskCompletionNotice != nil
     }
 
     var showsKiroCredits: Bool {
         showsKiroCreditsOverlay
+    }
+
+    var showsCodexWeeklyQuota: Bool {
+        showsCodexWeeklyQuotaOverlay
     }
 
     fileprivate var kiroCreditsUsage: KiroCreditsUsage? {
@@ -9315,9 +9258,23 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         return codexTokenUsage?.kiroCredits
     }
 
+    fileprivate var codexWeeklyQuota: CodexWeeklyQuota? {
+        guard isCodexTokenAutoExpanded else { return nil }
+        return codexTokenUsage?.weeklyQuota
+    }
+
     var kiroCreditsAccentColor: Color {
         guard let credits = kiroCreditsUsage else { return agentTokenAccentColor }
         let progress = credits.progress
+        if progress >= 0.95 { return Color.islandRed }
+        if progress >= 0.85 { return Color.islandTangerine }
+        if progress >= 0.70 { return theme.primaryAccent }
+        return theme.isLight ? theme.primaryAccent.opacity(0.92) : Color.islandGreen
+    }
+
+    var codexWeeklyQuotaAccentColor: Color {
+        guard let quota = codexWeeklyQuota else { return agentTokenAccentColor }
+        let progress = quota.progress
         if progress >= 0.95 { return Color.islandRed }
         if progress >= 0.85 { return Color.islandTangerine }
         if progress >= 0.70 { return theme.primaryAccent }
@@ -11999,7 +11956,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     func collapse() {
         isSelectionTranslationActive = false
-        guard taskCompletionNotice == nil, wechatMessageNotice == nil else { return }
+        guard taskCompletionNotice == nil else { return }
         isExpanded = false
     }
 
@@ -12111,6 +12068,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         if isCodexTokenAutoExpanded {
             isCodexTokenAutoExpanded = false
             showsKiroCreditsOverlay = false
+            showsCodexWeeklyQuotaOverlay = false
             activeExternalTokenSource = nil
             isExpanded = false
             activeMode = modeBeforeCodexTokenExpansion
@@ -12307,10 +12265,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             if let snapshot, snapshot != self.codexTokenUsage {
                 self.codexTokenUsage = snapshot
                 self.showsKiroCreditsOverlay = snapshot.kiroCredits != nil
+                self.showsCodexWeeklyQuotaOverlay = snapshot.weeklyQuota != nil
                 self.activeExternalTokenSource = snapshot.source
                 self.handleCodexTokenThreshold(snapshot)
             } else if snapshot == nil {
                 self.showsKiroCreditsOverlay = false
+                self.showsCodexWeeklyQuotaOverlay = false
             }
         }
     }
@@ -12394,16 +12354,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     private func presentTaskCompletionNotice(for state: ExternalTaskState) {
         guard isProActive else { return }
-        if wechatMessageNotice != nil {
-            let identity = "\(state.source.rawValue):\(state.sessionID):\(state.updatedAt.timeIntervalSince1970)"
-            let isAlreadyQueued = pendingTaskCompletionStates.contains {
-                "\($0.source.rawValue):\($0.sessionID):\($0.updatedAt.timeIntervalSince1970)" == identity
-            }
-            if !isAlreadyQueued {
-                pendingTaskCompletionStates.append(state)
-            }
-            return
-        }
         if taskCompletionNotice != nil {
             let identity = "\(state.source.rawValue):\(state.sessionID):\(state.updatedAt.timeIntervalSince1970)"
             let isAlreadyQueued = pendingTaskCompletionStates.contains {
@@ -12455,12 +12405,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         if !pendingTaskCompletionStates.isEmpty {
             let nextState = pendingTaskCompletionStates.removeFirst()
             presentTaskCompletionNotice(for: nextState)
-            return
-        }
-        if !pendingWeChatUnreadStates.isEmpty {
-            let nextState = pendingWeChatUnreadStates.removeFirst()
-            pendingWeChatUnreadStates.removeAll()
-            presentWeChatMessageNotice(state: nextState)
         }
     }
 
@@ -12502,198 +12446,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
     }
 
-    private func refreshWeChatUnread(force: Bool) {
-        let now = Date()
-        guard force || now.timeIntervalSince(lastWeChatUnreadRefreshDate) >= wechatUnreadPollInterval else { return }
-        lastWeChatUnreadRefreshDate = now
-
-        let wechatRunning = WeChatUnreadObserver.isWeChatRunning
-        if wechatRunning != wechatFileWatchActive {
-            if wechatRunning {
-                installWeChatFileWatchers()
-            } else {
-                removeWeChatFileWatchers()
-            }
-        } else if wechatRunning,
-                  now.timeIntervalSince(lastWeChatWatcherRefreshDate) >= wechatWatcherRefreshInterval
-        {
-            // WAL/material files get recreated; refresh watch targets periodically.
-            installWeChatFileWatchers()
-        }
-
-        // FS-watch hot path: mtime fingerprint only (no Dock AX).
-        if force {
-            applyWeChatUnreadState(WeChatUnreadObserver.unreadState(includeDockBadge: false))
-            return
-        }
-
-        Task { [weak self] in
-            let state = await Task.detached(priority: .userInitiated) {
-                WeChatUnreadObserver.unreadState(includeDockBadge: true)
-            }.value
-            guard let self else { return }
-            self.applyWeChatUnreadState(state)
-        }
-    }
-
-    private func scheduleWeChatUnreadBurstRefresh() {
-        wechatFileWatchDebounceWorkItem?.cancel()
-        wechatBurstRefreshWorkItems.forEach { $0.cancel() }
-        wechatBurstRefreshWorkItems.removeAll()
-
-        refreshWeChatUnread(force: true)
-
-        let followUp = DispatchWorkItem { [weak self] in
-            self?.refreshWeChatUnread(force: true)
-        }
-        wechatBurstRefreshWorkItems.append(followUp)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: followUp)
-    }
-
-    private func installWeChatFileWatchers() {
-        removeWeChatFileWatchers()
-        wechatFileWatchActive = true
-        lastWeChatWatcherRefreshDate = Date()
-
-        var watchPaths = WeChatUnreadObserver.activityWatchDirectories()
-        watchPaths.append(contentsOf: WeChatUnreadObserver.activityWatchFiles())
-
-        var seen = Set<String>()
-        for pathURL in watchPaths {
-            let path = pathURL.path
-            guard seen.insert(path).inserted else { continue }
-            let fd = open(path, O_EVTONLY)
-            guard fd >= 0 else { continue }
-            // Must use `.main`: MusicPlayerModel is @MainActor.
-            let source = DispatchSource.makeFileSystemObjectSource(
-                fileDescriptor: fd,
-                eventMask: [.write, .extend, .attrib, .link, .rename, .delete],
-                queue: .main
-            )
-            source.setEventHandler { [weak self] in
-                self?.scheduleWeChatUnreadBurstRefresh()
-            }
-            source.setCancelHandler {
-                close(fd)
-            }
-            source.resume()
-            wechatFileWatchSources.append(source)
-        }
-    }
-
-    private func removeWeChatFileWatchers() {
-        wechatFileWatchDebounceWorkItem?.cancel()
-        wechatFileWatchDebounceWorkItem = nil
-        wechatBurstRefreshWorkItems.forEach { $0.cancel() }
-        wechatBurstRefreshWorkItems.removeAll()
-        wechatFileWatchSources.forEach { $0.cancel() }
-        wechatFileWatchSources.removeAll()
-        wechatFileWatchActive = false
-    }
-
-    private func applyWeChatUnreadState(_ state: WeChatUnreadState?) {
-        guard let state else {
-            lastWeChatUnreadCount = nil
-            lastWeChatActivityMTimeNs = 0
-            lastWeChatNotifiedMTimeNs = 0
-            hasSeededWeChatUnread = false
-            pendingWeChatUnreadStates.removeAll()
-            removeWeChatFileWatchers()
-            return
-        }
-
-        let previousBadge = lastWeChatUnreadCount
-        let previousMTime = lastWeChatActivityMTimeNs
-        if state.badgeCount > 0 || previousBadge == nil {
-            lastWeChatUnreadCount = state.badgeCount
-        }
-        lastWeChatActivityMTimeNs = max(lastWeChatActivityMTimeNs, state.activityMTimeNs)
-
-        if !hasSeededWeChatUnread {
-            hasSeededWeChatUnread = true
-            lastWeChatNotifiedMTimeNs = state.activityMTimeNs
-            return
-        }
-
-        // While WeChat is focused, consuming activity avoids replaying your own sends later.
-        if WeChatUnreadObserver.isWeChatFrontmost {
-            lastWeChatNotifiedMTimeNs = max(lastWeChatNotifiedMTimeNs, state.activityMTimeNs)
-            pendingWeChatUnreadStates.removeAll()
-            return
-        }
-
-        if state.badgeCount > 0, state.badgeCount > (previousBadge ?? 0) {
-            lastWeChatNotifiedMTimeNs = state.activityMTimeNs
-            presentWeChatMessageNotice(state: state)
-            return
-        }
-
-        // Primary signal: message/session file mtime advanced (size can shrink on WAL checkpoint).
-        guard state.activityMTimeNs > previousMTime else { return }
-        guard state.activityMTimeNs > lastWeChatNotifiedMTimeNs else { return }
-        let now = Date()
-        guard now.timeIntervalSince(lastWeChatNoticeAt) >= wechatNoticeCooldown else { return }
-
-        lastWeChatNotifiedMTimeNs = state.activityMTimeNs
-        lastWeChatNoticeAt = now
-        presentWeChatMessageNotice(state: state)
-    }
-
-    private func presentWeChatMessageNotice(state: WeChatUnreadState) {
-        guard isProActive else { return }
-        if taskCompletionNotice != nil || wechatMessageNotice != nil {
-            pendingWeChatUnreadStates = [state]
-            return
-        }
-
-        pendingWeChatUnreadStates.removeAll()
-        let notice = WeChatMessageNotice.make(
-            badgeCount: state.badgeCount > 0 ? state.badgeCount : nil
-        )
-        wechatMessageDismissWorkItem?.cancel()
-        wechatMessageNotice = notice
-        let presentedAsFullScreenToast = requestWeChatMessagePresentation?() ?? false
-        isExpanded = !presentedAsFullScreenToast
-        NSSound(named: NSSound.Name("Glass"))?.play()
-
-        if !presentedAsFullScreenToast {
-            let workItem = DispatchWorkItem { [weak self] in
-                guard let self, self.wechatMessageNotice?.id == notice.id else { return }
-                self.dismissWeChatMessageNotice()
-            }
-            wechatMessageDismissWorkItem = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: workItem)
-        }
-    }
-
-    func dismissWeChatMessageNotice() {
-        wechatMessageDismissWorkItem?.cancel()
-        wechatMessageDismissWorkItem = nil
-        wechatMessageNotice = nil
-        isExpanded = false
-        pendingWeChatUnreadStates.removeAll()
-        if !pendingTaskCompletionStates.isEmpty {
-            let nextState = pendingTaskCompletionStates.removeFirst()
-            presentTaskCompletionNotice(for: nextState)
-        }
-    }
-
-    func openWeChatFromNotice() {
-        WeChatUnreadObserver.activateWeChat()
-        dismissWeChatMessageNotice()
-    }
-
-    func presentWeChatMessageTestNotice() {
-        let fingerprint = WeChatUnreadObserver.unreadState(includeDockBadge: false)
-        presentWeChatMessageNotice(
-            state: WeChatUnreadState(
-                badgeCount: max(1, lastWeChatUnreadCount ?? 3),
-                activityMTimeNs: fingerprint?.activityMTimeNs ?? lastWeChatActivityMTimeNs,
-                storeBytes: fingerprint?.storeBytes ?? 0
-            )
-        )
-    }
-
     func presentContextLimitTestReaction() {
         let snapshot = CodexTokenUsageSnapshot(
             source: .cursor,
@@ -12709,6 +12461,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         )
         codexTokenUsage = snapshot
         showsKiroCreditsOverlay = snapshot.kiroCredits != nil
+        showsCodexWeeklyQuotaOverlay = snapshot.weeklyQuota != nil
         activeExternalTokenSource = .cursor
         isCodexTokenAutoExpanded = true
         activeMode = .token
@@ -12977,6 +12730,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         isExpanded = false
         isCodexTokenAutoExpanded = false
         showsKiroCreditsOverlay = false
+        showsCodexWeeklyQuotaOverlay = false
         activeExternalTokenSource = nil
     }
 
@@ -15057,9 +14811,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
 
         refreshExternalTaskStates(force: false)
-        if isProActive {
-            refreshWeChatUnread(force: false)
-        }
         refreshSystemMetrics(force: false)
         refreshNetEaseNowPlaying(force: false)
         updateDesktopPetMood(now: tickDate)
@@ -15190,8 +14941,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
               !isAgentStreaming,
               !isAgentShellRunning,
               !isVoiceWhisperRecording,
-              taskCompletionNotice == nil,
-              wechatMessageNotice == nil
+              taskCompletionNotice == nil
         else {
             return
         }
@@ -18577,6 +18327,45 @@ private struct CodexTokenOverlayView: View {
 
 	            TokenProgressTrack(progress: model.agentTokenProgress, accent: model.agentTokenAccentColor)
 
+            if let weekly = model.codexWeeklyQuota {
+                VStack(spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("WEEKLY · \(weekly.windowLabel)")
+                            .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(
+                                theme.isLight
+                                    ? theme.primaryAccent.opacity(0.86)
+                                    : (theme.isPixelStyled
+                                        ? theme.pixelBorder.opacity(0.82)
+                                        : Color.white.opacity(0.4))
+                            )
+                        Spacer(minLength: 4)
+                        Text("剩余 \(weekly.remainingPercentText)")
+                            .font(theme.font(size: 10, weight: .bold))
+                            .foregroundStyle(model.codexWeeklyQuotaAccentColor)
+                            .monospacedDigit()
+                        Text("已用 \(weekly.usedPercentText)")
+                            .font(theme.font(size: 10, weight: .semibold))
+                            .foregroundStyle(theme.foreground(opacity: 0.88))
+                            .monospacedDigit()
+                    }
+
+                    TokenProgressTrack(progress: weekly.progress, accent: model.codexWeeklyQuotaAccentColor)
+
+                    HStack {
+                        Text(weekly.resetLabel ?? "周额度")
+                            .font(theme.font(size: 9, weight: .medium))
+                            .foregroundStyle(theme.mutedForeground(opacity: theme.isPixelStyled ? 0.72 : 0.84))
+                        Spacer(minLength: 4)
+                        if let plan = weekly.planType?.uppercased(), !plan.isEmpty {
+                            Text(plan)
+                                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(model.codexWeeklyQuotaAccentColor.opacity(0.82))
+                        }
+                    }
+                }
+            }
+
             if let credits = model.kiroCreditsUsage {
                 VStack(spacing: 6) {
                     HStack(spacing: 8) {
@@ -18652,146 +18441,6 @@ private struct CodexTokenOverlayView: View {
                 "\(model.agentTokenPercentText), \(model.agentTokenSummaryText) tokens, credits \($0.summaryText)"
             } ?? "\(model.agentTokenPercentText), \(model.agentTokenSummaryText) tokens"
         )
-    }
-}
-
-private struct WeChatMessageOverlayView: View {
-    @ObservedObject var model: MusicPlayerModel
-    @Environment(\.islandTheme) private var theme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var hasAppeared = false
-
-    var body: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(Color.islandGreen.opacity(theme.isLight ? 0.16 : 0.2))
-                Circle()
-                    .strokeBorder(Color.islandGreen.opacity(0.5), lineWidth: 1)
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(Color.islandGreen)
-            }
-            .frame(width: 50, height: 50)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("WECHAT · NEW MESSAGE")
-                    .font(theme.font(size: 8.5, weight: .semibold))
-                    .foregroundStyle(theme.primaryAccent.opacity(theme.isLight ? 0.9 : 0.72))
-                Text("微信新消息")
-                    .font(theme.font(size: 18, weight: .bold))
-                    .foregroundStyle(theme.foreground(opacity: 0.96))
-                Text(model.wechatMessageNotice?.title ?? "有未读消息")
-                    .font(theme.font(size: 10.5, weight: .medium))
-                    .foregroundStyle(theme.mutedForeground(opacity: 0.9))
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            Button {
-                model.openWeChatFromNotice()
-            } label: {
-                Text("打开")
-                    .font(theme.font(size: 11, weight: .bold))
-                    .foregroundStyle(theme.accentForeground)
-                    .padding(.horizontal, 12)
-                    .frame(height: 28)
-                    .background(theme.primaryAccent)
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .help("打开微信")
-
-            Button {
-                model.dismissWeChatMessageNotice()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(theme.mutedForeground(opacity: 0.78))
-                    .frame(width: 28, height: 28)
-                    .background(theme.controlFill.opacity(0.75))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help("关闭提醒")
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            model.openWeChatFromNotice()
-        }
-        .background { CodexTokenOverlayBackground() }
-        .scaleEffect(hasAppeared || reduceMotion ? 1 : 0.92, anchor: .top)
-        .offset(y: hasAppeared || reduceMotion ? 0 : -5)
-        .opacity(hasAppeared ? 1 : 0)
-        .onAppear {
-            if reduceMotion {
-                hasAppeared = true
-            } else {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
-                    hasAppeared = true
-                }
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(model.wechatMessageNotice?.title ?? "微信新消息")
-    }
-}
-
-private struct FullScreenWeChatMessageToastView: View {
-    let notice: WeChatMessageNotice
-    @Environment(\.islandTheme) private var theme
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.islandGreen.opacity(theme.isLight ? 0.15 : 0.2))
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(Color.islandGreen)
-            }
-            .frame(width: 40, height: 40)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("微信 · 新消息")
-                    .font(theme.font(size: 9, weight: .semibold))
-                    .foregroundStyle(theme.primaryAccent)
-                Text(notice.title)
-                    .font(theme.font(size: 14, weight: .bold))
-                    .foregroundStyle(theme.foreground(opacity: 0.95))
-                    .lineLimit(1)
-                Text("切回微信即可查看")
-                    .font(theme.font(size: 10, weight: .medium))
-                    .foregroundStyle(theme.mutedForeground(opacity: 0.84))
-            }
-
-            Spacer(minLength: 4)
-        }
-        .padding(.horizontal, 15)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background {
-            let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
-            ZStack {
-                VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
-                    .clipShape(shape)
-                shape.fill(
-                    theme.isLight
-                        ? Color.white.opacity(0.82)
-                        : Color(red: 0.045, green: 0.055, blue: 0.075).opacity(0.9)
-                )
-                shape.strokeBorder(
-                    theme.isLight ? Color.white.opacity(0.78) : Color.white.opacity(0.14),
-                    lineWidth: 1
-                )
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(notice.title)
     }
 }
 

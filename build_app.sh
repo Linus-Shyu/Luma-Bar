@@ -32,6 +32,9 @@ fi
 APP="$ROOT/luma bar.app"
 SIGN_IDENTITY="${LUMA_BAR_CODESIGN_IDENTITY:-}"
 BUILD_UNIVERSAL="${LUMA_BAR_BUILD_UNIVERSAL:-1}"
+# Ad-hoc (`-`) changes CDHash every build → macOS asks for Accessibility / Screen
+# Recording again. Prefer a stable Developer ID so TCC grants stick.
+ALLOW_ADHOC_SIGN="${LUMA_BAR_ALLOW_ADHOC_SIGN:-0}"
 
 if [[ -z "$SIGN_IDENTITY" ]]; then
   SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/Developer ID Application:/ { print $2; exit }')"
@@ -42,7 +45,13 @@ if [[ -z "$SIGN_IDENTITY" ]]; then
 fi
 
 if [[ -z "$SIGN_IDENTITY" ]]; then
-  SIGN_IDENTITY="-"
+  if [[ "$ALLOW_ADHOC_SIGN" == "1" ]]; then
+    SIGN_IDENTITY="-"
+  else
+    echo "error: no Apple code-signing identity found." >&2
+    echo "Install a Developer ID Application certificate, or set LUMA_BAR_ALLOW_ADHOC_SIGN=1 (permissions will reset each build)." >&2
+    exit 1
+  fi
 fi
 
 rm -rf "$APP"
@@ -71,7 +80,14 @@ if [[ -d "$ROOT/Support/Fonts" ]]; then
 fi
 chmod +x "$APP/Contents/MacOS/LumaBar"
 /usr/bin/xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
+# Drop interrupted codesign leftovers that break subsequent signs.
+find "$APP" -name '*.cstemp' -delete 2>/dev/null || true
 echo "Signing with: $SIGN_IDENTITY"
-/usr/bin/codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  /usr/bin/codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
+else
+  # Hardened runtime keeps the same Team ID requirement that TCC keys off of.
+  /usr/bin/codesign --force --deep --options runtime --sign "$SIGN_IDENTITY" "$APP"
+fi
 
 echo "$APP"
