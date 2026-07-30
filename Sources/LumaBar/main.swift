@@ -212,6 +212,7 @@ enum IslandTheme: String, CaseIterable {
     case eightBit
     case pixelConsole
     case pixelCat
+    case liquidGlass
 
     private static let defaultsKey = "LumaBar.theme"
 
@@ -239,6 +240,8 @@ enum IslandTheme: String, CaseIterable {
             return "Pixel Console"
         case .pixelCat:
             return "Pixel Cat"
+        case .liquidGlass:
+            return "Liquid Glass"
         }
     }
 
@@ -334,7 +337,7 @@ enum IslandTheme: String, CaseIterable {
     var isPixelStyled: Bool {
         switch self {
         case .adventureX, .eightBit, .pixelConsole: return true
-        case .bar, .mistBlue, .pixelCat: return false
+        case .bar, .mistBlue, .pixelCat, .liquidGlass: return false
         }
     }
 
@@ -363,6 +366,7 @@ enum IslandTheme: String, CaseIterable {
     var expandedCornerRadius: CGFloat {
         switch self {
         case .bar, .mistBlue, .pixelConsole, .pixelCat, .adventureX: return NotchMetrics.expandedCornerRadius
+        case .liquidGlass: return 28
         case .eightBit: return 4
         }
     }
@@ -373,12 +377,13 @@ enum IslandTheme: String, CaseIterable {
         case .pixelCat: return 14
         case .adventureX: return 5
         case .eightBit: return 2
+        case .liquidGlass: return 16
         }
     }
 
     var controlCornerRadius: CGFloat {
         switch self {
-        case .bar, .mistBlue, .pixelConsole, .pixelCat: return 999
+        case .bar, .mistBlue, .pixelConsole, .pixelCat, .liquidGlass: return 999
         case .adventureX: return 3
         case .eightBit: return 2
         }
@@ -390,6 +395,7 @@ enum IslandTheme: String, CaseIterable {
         case .pixelCat: return 10
         case .adventureX: return 3
         case .eightBit: return 2
+        case .liquidGlass: return 12
         }
     }
 
@@ -401,6 +407,7 @@ enum IslandTheme: String, CaseIterable {
         case .eightBit: return 4
         case .pixelConsole: return 18
         case .pixelCat: return 22
+        case .liquidGlass: return 28
         }
     }
 
@@ -418,6 +425,9 @@ enum IslandTheme: String, CaseIterable {
             return Color(red: 1.0, green: 0.70, blue: 0.31)
         case .pixelCat:
             return Color(red: 0.855, green: 0.498, blue: 0.337)
+        case .liquidGlass:
+            // Pearl specular accent (visionOS glass highlight family).
+            return Color(red: 0.86, green: 0.93, blue: 0.98)
         }
     }
 
@@ -433,6 +443,8 @@ enum IslandTheme: String, CaseIterable {
             return Color(red: 0.32, green: 0.95, blue: 0.46)
         case .pixelCat:
             return Color(red: 0.929, green: 0.675, blue: 0.463)
+        case .liquidGlass:
+            return Color(red: 0.72, green: 0.90, blue: 0.98)
         }
     }
 
@@ -448,6 +460,8 @@ enum IslandTheme: String, CaseIterable {
             return Color(red: 0.392, green: 0.592, blue: 0.788)
         case .adventureX:
             return Color(red: 0.212, green: 0.243, blue: 0.204)
+        case .liquidGlass:
+            return Color.white.opacity(0.42)
         }
     }
 
@@ -463,6 +477,8 @@ enum IslandTheme: String, CaseIterable {
             return Color(red: 0.929, green: 0.969, blue: 1.0)
         case .adventureX:
             return Color(red: 0.784, green: 0.745, blue: 0.647)
+        case .liquidGlass:
+            return Color.white.opacity(0.16)
         }
     }
 
@@ -477,6 +493,9 @@ enum IslandTheme: String, CaseIterable {
         if isPixelCat {
             return Color(red: 0.204, green: 0.165, blue: 0.153)
         }
+        if self == .liquidGlass {
+            return Color(red: 0.94, green: 0.98, blue: 1.0)
+        }
         return isLight
             ? Color(red: 0.094, green: 0.204, blue: 0.322)
             : .white
@@ -488,6 +507,9 @@ enum IslandTheme: String, CaseIterable {
         }
         if isPixelCat {
             return Color(red: 0.455, green: 0.404, blue: 0.38)
+        }
+        if self == .liquidGlass {
+            return Color(red: 0.78, green: 0.90, blue: 0.96)
         }
         return isLight
             ? Color(red: 0.471, green: 0.565, blue: 0.667)
@@ -509,6 +531,9 @@ enum IslandTheme: String, CaseIterable {
         if isPixelCat {
             return Color.white.opacity(0.48)
         }
+        if self == .liquidGlass {
+            return Color.white.opacity(0.12)
+        }
         return isLight
             ? Color(red: 0.929, green: 0.969, blue: 1.0).opacity(0.82)
             : Color.white.opacity(0.08)
@@ -517,6 +542,9 @@ enum IslandTheme: String, CaseIterable {
     var controlFill: Color {
         if isPixelCat {
             return Color.white.opacity(0.52)
+        }
+        if self == .liquidGlass {
+            return Color.white.opacity(0.18)
         }
         return isPixelStyled ? pixelControlFill : (isLight ? primaryAccent.opacity(0.12) : Color.white.opacity(0.08))
     }
@@ -530,7 +558,10 @@ enum IslandTheme: String, CaseIterable {
     }
 
     var separatorColor: Color {
-        isPixelCat
+        if self == .liquidGlass {
+            return Color.white.opacity(0.22)
+        }
+        return isPixelCat
             ? pixelBorder.opacity(0.34)
             : (isLight ? pixelBorder.opacity(0.2) : Color.white.opacity(0.1))
     }
@@ -5938,13 +5969,14 @@ private final class GlobalHotKey: @unchecked Sendable {
 struct VisualEffectBackground: NSViewRepresentable {
     let material: NSVisualEffectView.Material
     let blendingMode: NSVisualEffectView.BlendingMode
+    var isEmphasized: Bool = true
 
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = material
         view.blendingMode = blendingMode
         view.state = .active
-        view.isEmphasized = true
+        view.isEmphasized = isEmphasized
         return view
     }
 
@@ -5952,6 +5984,7 @@ struct VisualEffectBackground: NSViewRepresentable {
         view.material = material
         view.blendingMode = blendingMode
         view.state = .active
+        view.isEmphasized = isEmphasized
     }
 }
 
@@ -5971,6 +6004,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     private var eightBitThemeMenuItem: NSMenuItem?
     private var pixelConsoleThemeMenuItem: NSMenuItem?
     private var pixelCatThemeMenuItem: NSMenuItem?
+    private var liquidGlassThemeMenuItem: NSMenuItem?
     private var selectionTranslationMenuItem: NSMenuItem?
     private var statusItem: NSStatusItem?
     private var statusBarThemeMenuItem: NSMenuItem?
@@ -5979,6 +6013,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     private var statusEightBitThemeMenuItem: NSMenuItem?
     private var statusPixelConsoleThemeMenuItem: NSMenuItem?
     private var statusPixelCatThemeMenuItem: NSMenuItem?
+    private var statusLiquidGlassThemeMenuItem: NSMenuItem?
     private var statusSelectionTranslationMenuItem: NSMenuItem?
     private var statusLicenseMenuItem: NSMenuItem?
     private var permissionWindow: NSWindow?
@@ -7797,7 +7832,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                 pinExpandedPanelFromUserClick(expandIfNeeded: true)
             }
         case .openExternalToken:
-            model.presentExternalTokenDashboard()
+            // Same as a normal bar click: open Music / System / Agent, not the token sheet.
             pinExpandedPanelFromUserClick(expandIfNeeded: true)
         case .agentQuickAction(let kind):
             if let expandedWindow {
@@ -7811,6 +7846,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         isExpandedByBarHover = false
         barHoverCollapseWorkItem?.cancel()
         barHoverCollapseWorkItem = nil
+        model.prepareExpandedContentForUserInteraction()
         if expandIfNeeded {
             model.isExpanded = true
         }
@@ -7943,7 +7979,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             (rect: controls.play, action: .togglePlayback),
             (
                 rect: controls.expand,
-                action: model.isMonitoringExternalTokenUsage ? .openExternalToken : .toggleExpanded
+                action: .toggleExpanded
             ),
             (rect: controls.next, action: .nextTrack)
         ]
@@ -8102,6 +8138,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         themeMenu.addItem(pixelCatItem)
         pixelCatThemeMenuItem = pixelCatItem
 
+        let liquidGlassItem = NSMenuItem(
+            title: IslandTheme.liquidGlass.displayName,
+            action: #selector(selectLiquidGlassTheme),
+            keyEquivalent: "7"
+        )
+        liquidGlassItem.target = self
+        liquidGlassItem.keyEquivalentModifierMask = [.command, .option]
+        themeMenu.addItem(liquidGlassItem)
+        liquidGlassThemeMenuItem = liquidGlassItem
+
         themeMenuItem.submenu = themeMenu
         appMenu.insertItem(themeMenuItem, at: 0)
         appMenu.insertItem(.separator(), at: 1)
@@ -8230,6 +8276,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         )
         themeMenu.addItem(pixelCatItem)
         statusPixelCatThemeMenuItem = pixelCatItem
+
+        let liquidGlassItem = statusThemeItem(
+            title: IslandTheme.liquidGlass.displayName,
+            action: #selector(selectLiquidGlassTheme)
+        )
+        themeMenu.addItem(liquidGlassItem)
+        statusLiquidGlassThemeMenuItem = liquidGlassItem
 
         themeParent.submenu = themeMenu
         menu.addItem(themeParent)
@@ -8372,6 +8425,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
     @objc private func selectPixelCatTheme() {
         model.theme = .pixelCat
+    }
+
+    @objc private func selectLiquidGlassTheme() {
+        model.theme = .liquidGlass
     }
 
     @objc private func toggleSelectionTranslation() {
@@ -8554,12 +8611,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         eightBitThemeMenuItem?.state = theme == .eightBit ? .on : .off
         pixelConsoleThemeMenuItem?.state = theme == .pixelConsole ? .on : .off
         pixelCatThemeMenuItem?.state = theme == .pixelCat ? .on : .off
+        liquidGlassThemeMenuItem?.state = theme == .liquidGlass ? .on : .off
         statusBarThemeMenuItem?.state = theme == .bar ? .on : .off
         statusMistBlueThemeMenuItem?.state = theme == .mistBlue ? .on : .off
         statusAdventureXThemeMenuItem?.state = theme == .adventureX ? .on : .off
         statusEightBitThemeMenuItem?.state = theme == .eightBit ? .on : .off
         statusPixelConsoleThemeMenuItem?.state = theme == .pixelConsole ? .on : .off
         statusPixelCatThemeMenuItem?.state = theme == .pixelCat ? .on : .off
+        statusLiquidGlassThemeMenuItem?.state = theme == .liquidGlass ? .on : .off
     }
 }
 
@@ -9714,6 +9773,13 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     /// True while Cursor / Codex / Kiro is frontmost and we are sampling its context window.
     var isMonitoringExternalTokenUsage: Bool {
         activeExternalTokenSource != nil
+    }
+
+    /// Compact bar prefers quota/context while Cursor/Codex is frontmost,
+    /// without forcing the expanded panel into the dedicated token dashboard.
+    var shouldShowExternalTokenInCompact: Bool {
+        guard isMonitoringExternalTokenUsage else { return false }
+        return activeMode == .music || activeMode == .token
     }
 
     private var usesExternalTokenDisplay: Bool {
@@ -12608,21 +12674,32 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     private func presentTokenOverlayIfNeeded(expand: Bool) {
+        // Near-limit alerts should not hijack the expanded island into a
+        // token-only sheet. Compact already surfaces Cursor/Codex quota while
+        // the IDE is frontmost; pet bubbles cover the warning itself.
         guard activeExternalTokenSource != nil || codexTokenUsage != nil else { return }
-        if !isCodexTokenAutoExpanded {
-            if activeMode != .token {
-                modeBeforeCodexTokenExpansion = activeMode
-            }
-            isCodexTokenAutoExpanded = true
-            activeMode = .token
+        _ = expand
+    }
+
+    /// Ensure a user-driven expand shows Music / System / Agent, not the token sheet.
+    func prepareExpandedContentForUserInteraction() {
+        if isCodexTokenAutoExpanded {
+            isCodexTokenAutoExpanded = false
+            showsKiroCreditsOverlay = false
+            showsCodexWeeklyQuotaOverlay = false
         }
-        if expand {
-            isExpanded = true
+        if activeMode == .token {
+            let restored = modeBeforeCodexTokenExpansion
+            activeMode = restored == .token ? .music : restored
         }
     }
 
     func presentExternalTokenDashboard() {
-        presentTokenOverlayIfNeeded(expand: true)
+        prepareExpandedContentForUserInteraction()
+        if activeMode != .music && activeMode != .system && activeMode != .agent {
+            activeMode = .music
+        }
+        isExpanded = true
     }
 
     private func refreshExternalTaskStates(force: Bool) {
@@ -13047,7 +13124,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         isCodexTokenAutoExpanded = false
         showsKiroCreditsOverlay = false
         showsCodexWeeklyQuotaOverlay = false
-        activeExternalTokenSource = nil
+        // Keep activeExternalTokenSource so Cursor/Codex compact quota continues.
     }
 
     func saveAgentAPIKey() {
@@ -15692,6 +15769,252 @@ private struct CompactBarShape: InsettableShape {
     }
 }
 
+
+/// visionOS Glass Material tokens — aligned with Apple visionOS Figma Community kit:
+/// ultra-thin vibrancy, dual inner shadows, and a 0.5–1pt rim light.
+private enum LiquidGlassPaint {
+    enum Role {
+        case compact
+        case panel
+        case card
+        case overlay
+        case control
+    }
+
+    static func washOpacity(role: Role, isHovering: Bool, isSelected: Bool) -> Double {
+        switch role {
+        case .compact:
+            return isHovering ? 0.20 : 0.15
+        case .panel, .overlay:
+            return 0.03
+        case .card:
+            return isSelected ? 0.10 : 0.04
+        case .control:
+            return isSelected ? 0.24 : 0.16
+        }
+    }
+
+    /// Rim Light width from the Glass Material spec (0.5pt idle → 1pt emphasized).
+    static func rimWidth(emphasized: Bool, role: Role) -> CGFloat {
+        switch role {
+        case .panel, .overlay:
+            return 1.0
+        case .card:
+            return 0.5
+        case .compact, .control:
+            return emphasized ? 1.0 : 0.5
+        }
+    }
+
+    static func rimGradient(emphasized: Bool, role: Role) -> LinearGradient {
+        switch role {
+        case .panel, .overlay:
+            // Large sheets need a cleaner, more even rim — less milky than the bar.
+            return LinearGradient(
+                colors: [
+                    Color.white.opacity(0.72),
+                    Color.white.opacity(0.28),
+                    Color.white.opacity(0.48),
+                    Color.white.opacity(0.22)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        default:
+            return LinearGradient(
+                colors: [
+                    Color.white.opacity(emphasized ? 0.78 : 0.58),
+                    Color.white.opacity(emphasized ? 0.42 : 0.28),
+                    Color.white.opacity(emphasized ? 0.55 : 0.36),
+                    Color.white.opacity(emphasized ? 0.32 : 0.20)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+    }
+}
+
+/// Dual inner-shadow stack used by visionOS glass surfaces.
+private struct LiquidGlassInnerShadows<S: Shape>: View {
+    let shape: S
+    var role: LiquidGlassPaint.Role = .compact
+
+    var body: some View {
+        Group {
+            switch role {
+            case .compact, .control:
+                // Compact bar recipe (kept exactly — user-approved).
+                ZStack {
+                    shape
+                        .stroke(Color.white.opacity(0.10), lineWidth: 4)
+                        .blur(radius: 2)
+                    shape
+                        .stroke(Color.black.opacity(0.32), lineWidth: 5)
+                        .offset(y: 0.75)
+                        .blur(radius: 3.5)
+                }
+            case .panel, .overlay:
+                // Expanded sheet: barely-there depth so wallpaper stays readable.
+                ZStack {
+                    shape
+                        .stroke(Color.white.opacity(0.06), lineWidth: 2)
+                        .blur(radius: 1)
+                    shape
+                        .stroke(Color.black.opacity(0.06), lineWidth: 8)
+                        .offset(y: 1)
+                        .blur(radius: 8)
+                }
+            case .card:
+                // Content wells only need a soft inner catch — not full glass depth.
+                shape
+                    .stroke(Color.white.opacity(0.08), lineWidth: 2)
+                    .blur(radius: 1)
+            }
+        }
+        .clipShape(shape)
+        .allowsHitTesting(false)
+    }
+}
+
+/// Shared Liquid Glass surface: `.ultraThinMaterial` + wash + dual inner shadows + rim light.
+/// Compact keeps the denser “jewel” look; panel/overlay use a clearer floating sheet.
+private struct LiquidGlassSurface<S: InsettableShape>: View {
+    let shape: S
+    var role: LiquidGlassPaint.Role = .panel
+    var isHovering: Bool = false
+    var isSelected: Bool = false
+    var selectedAccent: Color? = nil
+
+    private var emphasized: Bool { isHovering || isSelected }
+
+    var body: some View {
+        Group {
+            switch role {
+            case .card:
+                cardBody
+            case .panel, .overlay:
+                panelBody
+            case .compact, .control:
+                compactBody
+            }
+        }
+    }
+
+    /// Compact bar / small controls — denser recipe the user already likes.
+    private var compactBody: some View {
+        ZStack {
+            shape.fill(.ultraThinMaterial)
+
+            shape.fill(
+                Color.white.opacity(
+                    LiquidGlassPaint.washOpacity(
+                        role: role,
+                        isHovering: isHovering,
+                        isSelected: isSelected
+                    )
+                )
+            )
+
+            if isSelected, let selectedAccent {
+                shape.fill(selectedAccent.opacity(0.14))
+            }
+
+            LiquidGlassInnerShadows(shape: shape, role: role)
+
+            shape.fill(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(emphasized ? 0.20 : 0.12),
+                        Color.white.opacity(0.03),
+                        .clear
+                    ],
+                    startPoint: .top,
+                    endPoint: UnitPoint(x: 0.5, y: 0.45)
+                )
+            )
+
+            shape.strokeBorder(
+                LiquidGlassPaint.rimGradient(emphasized: emphasized, role: role),
+                lineWidth: LiquidGlassPaint.rimWidth(emphasized: emphasized, role: role)
+            )
+        }
+        .compositingGroup()
+        .clipShape(shape)
+    }
+
+    /// Expanded island / overlays — true behind-window glass so wallpaper shows through.
+    private var panelBody: some View {
+        ZStack {
+            // Sample the desktop directly. ultraThinMaterial alone frosts too hard
+            // on a large panel and hides the wallpaper.
+            VisualEffectBackground(
+                material: .hudWindow,
+                blendingMode: .behindWindow,
+                isEmphasized: false
+            )
+            .clipShape(shape)
+
+            // Barely-there glass wash — keep content readable without milking the view.
+            shape.fill(Color.white.opacity(0.035))
+
+            LiquidGlassInnerShadows(shape: shape, role: role)
+
+            // Soft top catch only — no heavy specular slab.
+            shape.fill(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.08),
+                        .clear
+                    ],
+                    startPoint: .top,
+                    endPoint: UnitPoint(x: 0.5, y: 0.22)
+                )
+            )
+
+            // Rim Light — keeps the sheet edge without filling the center.
+            shape.strokeBorder(
+                LiquidGlassPaint.rimGradient(emphasized: true, role: role),
+                lineWidth: 1.0
+            )
+
+            shape
+                .inset(by: 1.25)
+                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+        }
+        .clipShape(shape)
+    }
+
+    /// Interior wells on glass — frosted chips, never nested ultraThinMaterial.
+    private var cardBody: some View {
+        ZStack {
+            shape.fill(
+                Color.white.opacity(
+                    LiquidGlassPaint.washOpacity(
+                        role: .card,
+                        isHovering: false,
+                        isSelected: isSelected
+                    )
+                )
+            )
+
+            if isSelected, let selectedAccent {
+                shape.fill(selectedAccent.opacity(0.08))
+            }
+
+            LiquidGlassInnerShadows(shape: shape, role: .card)
+
+            shape.strokeBorder(
+                isSelected
+                    ? (selectedAccent ?? Color.white).opacity(0.45)
+                    : Color.white.opacity(0.18),
+                lineWidth: 0.5
+            )
+        }
+        .clipShape(shape)
+    }
+}
+
 private struct CompactBarBackground: View {
     let isHovering: Bool
     @Environment(\.islandTheme) private var theme
@@ -15790,6 +16113,8 @@ private struct CompactBarBackground: View {
                 .padding(.horizontal, 5)
                 .padding(.bottom, 3)
                 .clipShape(shape)
+            case .liquidGlass:
+                LiquidGlassSurface(shape: shape, role: .compact, isHovering: isHovering)
             case .bar:
                 VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow)
                     .clipShape(shape)
@@ -15899,6 +16224,8 @@ private struct ExpandedIslandBackground: View {
                 .frame(height: 4)
                 .padding(.horizontal, 18)
                 .padding(.top, 6)
+            case .liquidGlass:
+                LiquidGlassSurface(shape: shape, role: .panel)
             case .bar:
                 VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow)
                     .clipShape(shape)
@@ -15993,6 +16320,13 @@ private struct ThemedCardBackground: View {
                 shape.strokeBorder(
                     isSelected ? selectedAccent.opacity(0.48) : Color.white.opacity(0.58),
                     lineWidth: 1
+                )
+            case .liquidGlass:
+                LiquidGlassSurface(
+                    shape: shape,
+                    role: .card,
+                    isSelected: isSelected,
+                    selectedAccent: selectedAccent
                 )
             }
         }
@@ -16590,13 +16924,18 @@ struct CompactLeftView: View {
 
     var body: some View {
         Button {
-            model.isExpanded.toggle()
+            if model.isExpanded {
+                model.isExpanded = false
+            } else {
+                model.prepareExpandedContentForUserInteraction()
+                model.isExpanded = true
+            }
         } label: {
             HStack(spacing: 8) {
                 if model.activeMode == .system {
                     SystemGlyphBadge(metrics: model.systemMetrics)
                         .frame(width: 24, height: 24)
-                } else if model.activeMode == .token {
+                } else if model.shouldShowExternalTokenInCompact || model.activeMode == .token {
                     TokenGlyphBadge(progress: model.agentTokenProgress)
                         .frame(width: 24, height: 24)
                 } else if model.activeMode == .agent {
@@ -16611,11 +16950,19 @@ struct CompactLeftView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(model.activeMode == .music ? model.compactMusicTitle : model.activeDisplayTitle)
+                    Text(
+                        model.shouldShowExternalTokenInCompact
+                            ? model.agentModelDisplayName
+                            : (model.activeMode == .music ? model.compactMusicTitle : model.activeDisplayTitle)
+                    )
                         .font(theme.font(size: 10, weight: .semibold))
                         .foregroundStyle(theme.foreground(opacity: 0.92))
                         .lineLimit(1)
-                    Text(model.activeMode == .music ? model.compactMusicSubtitle : model.activeDisplaySubtitle)
+                    Text(
+                        model.shouldShowExternalTokenInCompact
+                            ? model.agentTokenSummaryText
+                            : (model.activeMode == .music ? model.compactMusicSubtitle : model.activeDisplaySubtitle)
+                    )
                         .font(theme.font(size: 8.5, weight: .medium))
                         .foregroundStyle(theme.mutedForeground(opacity: 0.92))
                         .lineLimit(1)
@@ -16672,7 +17019,12 @@ struct CompactRightView: View {
                 }
             } else if model.activeMode == .token {
                 Button {
-                    model.isExpanded.toggle()
+                    if model.isExpanded {
+                        model.isExpanded = false
+                    } else {
+                        model.prepareExpandedContentForUserInteraction()
+                        model.isExpanded = true
+                    }
                 } label: {
                     HStack(spacing: 6) {
                         TokenUsageGauge(
@@ -16735,13 +17087,14 @@ struct CompactRightView: View {
                     .help(model.displayedIsPlaying ? "Pause" : "Play")
 
                     Button {
-                        if model.isMonitoringExternalTokenUsage {
-                            model.presentExternalTokenDashboard()
+                        if model.isExpanded {
+                            model.isExpanded = false
                         } else {
-                            model.isExpanded.toggle()
+                            model.prepareExpandedContentForUserInteraction()
+                            model.isExpanded = true
                         }
                     } label: {
-                        if model.isMonitoringExternalTokenUsage {
+                        if model.shouldShowExternalTokenInCompact {
                             TokenUsageGauge(
                                 progress: model.agentTokenProgress,
                                 label: "AI",
@@ -16755,8 +17108,8 @@ struct CompactRightView: View {
                     }
                     .buttonStyle(.plain)
                     .help(
-                        model.isMonitoringExternalTokenUsage
-                            ? "Open \(model.externalTokenBrandLabel) · \(model.agentTokenPercentText)"
+                        model.shouldShowExternalTokenInCompact
+                            ? "Open player · \(model.externalTokenBrandLabel) \(model.agentTokenPercentText)"
                             : "Open player"
                     )
                     .animation(.easeInOut(duration: 0.2), value: model.agentTokenProgress)
@@ -18175,6 +18528,26 @@ private struct TokenUsageGauge: View {
                         .stroke(Color.white.opacity(0.78), lineWidth: 1)
                 }
                 .shadow(color: theme.primaryAccent.opacity(0.12), radius: 6, y: 2)
+
+            case .liquidGlass:
+                let lineWidth = max(3.5, side * 0.1)
+                ZStack {
+                    LiquidGlassSurface(shape: Circle(), role: .control)
+                    Circle()
+                        .trim(from: 0, to: clampedProgress)
+                        .stroke(
+                            LinearGradient(
+                                colors: [theme.primaryAccent, progressAccent],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                    Text(label)
+                        .font(.system(size: max(8, side * 0.24), weight: .bold, design: .rounded))
+                        .foregroundStyle(theme.foreground(opacity: 0.94))
+                }
             }
         }
         .animation(theme.isEightBit ? nil : .easeInOut(duration: 0.22), value: clampedProgress)
@@ -18343,9 +18716,27 @@ private struct TokenProgressTrack: View {
                     }
                     .shadow(color: theme.primaryAccent.opacity(0.1), radius: 3, y: 1)
                 }
+
+            case .liquidGlass:
+                GeometryReader { proxy in
+                    let track = Capsule(style: .continuous)
+                    ZStack(alignment: .leading) {
+                        LiquidGlassSurface(shape: track, role: .control)
+                        track
+                            .fill(
+                                LinearGradient(
+                                    colors: [theme.primaryAccent, progressAccent],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: proxy.size.width * clampedProgress)
+                            .clipShape(track)
+                    }
+                }
             }
         }
-        .frame(height: theme == .bar || theme == .mistBlue ? 4 : 7)
+        .frame(height: theme == .bar || theme == .mistBlue || theme == .liquidGlass ? 4 : 7)
         .animation(theme.isEightBit ? nil : .easeInOut(duration: 0.22), value: clampedProgress)
     }
 
@@ -18360,7 +18751,7 @@ private struct TokenUsageCardBackground: View {
     @Environment(\.islandTheme) private var theme
 
     var body: some View {
-        let radius: CGFloat = theme == .bar || theme == .mistBlue ? 41 : (theme.isEightBit ? 2 : 12)
+        let radius: CGFloat = theme == .bar || theme == .mistBlue || theme == .liquidGlass ? 41 : (theme.isEightBit ? 2 : 12)
         let shape = ThemeRectShape(radius: radius, chamfer: 0)
 
         ZStack(alignment: .top) {
@@ -18455,6 +18846,9 @@ private struct TokenUsageCardBackground: View {
                     )
                     .frame(width: 58, height: 2)
                     .padding(.top, 6)
+
+            case .liquidGlass:
+                LiquidGlassSurface(shape: shape, role: .overlay)
             }
         }
         .clipShape(shape)
@@ -18566,6 +18960,9 @@ private struct CodexTokenOverlayBackground: View {
                     )
                     .frame(width: 68, height: 2)
                     .padding(.top, 6)
+
+            case .liquidGlass:
+                LiquidGlassSurface(shape: shape, role: .overlay)
             }
         }
         .clipShape(shape)
@@ -19667,7 +20064,9 @@ struct MusicExpandedView: View {
             )
         )
         .shadow(
-            color: theme.isAdventureX
+            color: theme == .liquidGlass
+                ? Color.black.opacity(0.12)
+                : (theme.isAdventureX
                 ? Color(red: 0.31, green: 0.33, blue: 0.28).opacity(0.72)
                 : (theme.isLight
                 ? theme.primaryAccent.opacity(0.22)
@@ -19675,10 +20074,14 @@ struct MusicExpandedView: View {
                 ? .clear
                 : (theme.isPixelCat
                     ? .black.opacity(0.38)
-                    : (theme.isPixelStyled ? .black.opacity(0.72) : .black.opacity(0.26))))),
-            radius: theme.isPixelCat ? 14 : (theme.isPixelStyled ? 0 : 12),
+                    : (theme.isPixelStyled ? .black.opacity(0.72) : .black.opacity(0.26)))))),
+            radius: theme == .liquidGlass
+                ? 24
+                : (theme.isPixelCat ? 14 : (theme.isPixelStyled ? 0 : 12)),
             x: theme.isEightBit ? 4 : 0,
-            y: theme.isAdventureX ? 7 : (theme.isEightBit ? 4 : (theme.isPixelCat ? 8 : 7))
+            y: theme == .liquidGlass
+                ? 10
+                : (theme.isAdventureX ? 7 : (theme.isEightBit ? 4 : (theme.isPixelCat ? 8 : 7)))
         )
         .animation(.spring(response: 0.24, dampingFraction: 0.9), value: model.activeMode)
         .animation(.easeInOut(duration: 0.16), value: model.displayedIsPlaying)
@@ -19718,22 +20121,41 @@ struct MusicExpandedView: View {
                     .font(theme.font(size: 10, weight: .semibold))
                     .lineLimit(1)
             }
-            .foregroundStyle(active ? theme.accentForeground : theme.foreground(opacity: 0.74))
+            .foregroundStyle(
+                theme == .liquidGlass
+                    ? (active ? Color.black.opacity(0.78) : theme.foreground(opacity: 0.78))
+                    : (active ? theme.accentForeground : theme.foreground(opacity: 0.74))
+            )
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background {
-                RoundedRectangle(cornerRadius: theme.controlCornerRadius, style: .continuous)
-                    .fill(
-                        active
-                            ? (theme.isPixelStyled || theme.isLight ? theme.primaryAccent : Color.white.opacity(0.92))
-                            : theme.controlFill
-                    )
-                    .overlay {
-                        if theme.isPixelStyled || theme.isLight {
-                            RoundedRectangle(cornerRadius: theme.controlCornerRadius, style: .continuous)
-                                .stroke(active ? theme.primaryAccent : theme.pixelBorder.opacity(0.28), lineWidth: 1)
+                let pill = RoundedRectangle(cornerRadius: theme.controlCornerRadius, style: .continuous)
+                if theme == .liquidGlass {
+                    // Frosted chips on the sheet — not nested ultraThinMaterial.
+                    pill
+                        .fill(active ? Color.white.opacity(0.88) : Color.white.opacity(0.10))
+                        .overlay {
+                            pill.strokeBorder(
+                                Color.white.opacity(active ? 0.72 : 0.28),
+                                lineWidth: 0.5
+                            )
                         }
-                    }
+                } else {
+                    pill
+                        .fill(
+                            active
+                                ? (theme.isPixelStyled || theme.isLight ? theme.primaryAccent : Color.white.opacity(0.92))
+                                : theme.controlFill
+                        )
+                        .overlay {
+                            if theme.isPixelStyled || theme.isLight {
+                                pill.stroke(
+                                    active ? theme.primaryAccent : theme.pixelBorder.opacity(0.28),
+                                    lineWidth: 1
+                                )
+                            }
+                        }
+                }
             }
         }
         .buttonStyle(.plain)
