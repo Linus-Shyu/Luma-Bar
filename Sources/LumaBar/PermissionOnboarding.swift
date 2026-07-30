@@ -1,62 +1,48 @@
 import AppKit
 import ApplicationServices
-import AVFoundation
-import Contacts
 import MusicKit
-import Speech
 import SwiftUI
 
 enum LumaBarPermission: String, CaseIterable, Identifiable {
     case music
-    case microphone
-    case speechRecognition
-    case contacts
-    case screenRecording
     case accessibility
+    case screenRecording
 
     var id: String { rawValue }
+
+    static var onboardingCases: [LumaBarPermission] {
+        [.music, .accessibility, .screenRecording]
+    }
 
     var title: String {
         switch self {
         case .music: "媒体资料库"
-        case .microphone: "麦克风"
-        case .speechRecognition: "语音识别"
-        case .contacts: "通讯录"
-        case .screenRecording: "屏幕录制"
         case .accessibility: "辅助功能"
+        case .screenRecording: "屏幕录制"
         }
     }
 
-    var detail: String {
+    var hint: String {
         switch self {
-        case .music: "读取本地音乐并显示正在播放的歌曲。"
-        case .microphone: "使用 Voice Whisper 录入语音。"
-        case .speechRecognition: "把语音转换成文字和指令。"
-        case .contacts: "按姓名查找联系人并准备信息。"
-        case .screenRecording: "仅在你要求时分析当前窗口截图。"
-        case .accessibility: "读取选中文本并支持全局快捷操作。"
+        case .music: "播放本地音乐"
+        case .accessibility: "划词翻译需要"
+        case .screenRecording: "截图分析需要（可后开）"
         }
     }
 
     var symbolName: String {
         switch self {
         case .music: "music.note.list"
-        case .microphone: "mic.fill"
-        case .speechRecognition: "waveform"
-        case .contacts: "person.crop.circle"
-        case .screenRecording: "rectangle.inset.filled.and.person.filled"
         case .accessibility: "accessibility"
+        case .screenRecording: "rectangle.dashed.badge.record"
         }
     }
 
     var settingsAnchor: String {
         switch self {
         case .music: "Privacy_Media"
-        case .microphone: "Privacy_Microphone"
-        case .speechRecognition: "Privacy_SpeechRecognition"
-        case .contacts: "Privacy_Contacts"
-        case .screenRecording: "Privacy_ScreenCapture"
         case .accessibility: "Privacy_Accessibility"
+        case .screenRecording: "Privacy_ScreenCapture"
         }
     }
 }
@@ -67,12 +53,13 @@ enum LumaBarPermissionState: Equatable {
     case denied
     case restricted
 
+    var isAuthorized: Bool { self == .authorized }
+
     var label: String {
         switch self {
-        case .notDetermined: "待设置"
-        case .authorized: "已授权"
-        case .denied: "未授权"
-        case .restricted: "受系统限制"
+        case .notDetermined: "未设置"
+        case .authorized: "已开启"
+        case .denied, .restricted: "未开启"
         }
     }
 }
@@ -82,354 +69,220 @@ final class PermissionOnboardingModel: ObservableObject {
     static let completionKey = "LumaBar.permissionOnboarding.v1"
 
     @Published private(set) var states: [LumaBarPermission: LumaBarPermissionState] = [:]
-    @Published private(set) var isRequestingAll = false
+    @Published private(set) var isRequesting = false
+
+    var onPermissionBecameAuthorized: ((LumaBarPermission) -> Void)?
 
     private let onFinished: () -> Void
+    private var previousAuthorized: Set<LumaBarPermission> = []
+    private var pollTask: Task<Void, Never>?
 
     init(onFinished: @escaping () -> Void) {
         self.onFinished = onFinished
         refresh()
+        previousAuthorized = authorizedSet
     }
 
     static var hasCompletedSetup: Bool {
         UserDefaults.standard.bool(forKey: completionKey)
     }
 
-    var allCorePermissionsGranted: Bool {
-        LumaBarPermission.allCases.allSatisfy { states[$0] == .authorized }
-    }
-
-    var grantedCount: Int {
-        LumaBarPermission.allCases.filter { states[$0] == .authorized }.count
+    private var authorizedSet: Set<LumaBarPermission> {
+        Set(LumaBarPermission.onboardingCases.filter { states[$0]?.isAuthorized == true })
     }
 
     func refresh() {
-        states[.music] = Self.musicState
-        states[.microphone] = Self.microphoneState
-        states[.speechRecognition] = Self.speechState
-        states[.contacts] = Self.contactsState
-        states[.screenRecording] = CGPreflightScreenCaptureAccess() ? .authorized : .notDetermined
-        states[.accessibility] = AXIsProcessTrusted() ? .authorized : .notDetermined
+        let next = Self.readSnapshot()
+        let nowAuthorized = Set(LumaBarPermission.onboardingCases.filter { next[$0]?.isAuthorized == true })
+        let newly = nowAuthorized.subtracting(previousAuthorized)
+        states = next
+        previousAuthorized = nowAuthorized
+        for permission in newly {
+            onPermissionBecameAuthorized?(permission)
+        }
+    }
+
+    func syncFromSystemSettings() {
+        pollTick()
+    }
+
+    func pollTick() {
+        guard pollTask == nil else { return }
+        pollTask = Task { @MainActor in
+            defer { pollTask = nil }
+            refresh()
+        }
     }
 
     func requestAll() {
-        guard !isRequestingAll else { return }
-        isRequestingAll = true
+        guard !isRequesting else { return }
+        isRequesting = true
         Task { @MainActor in
-            for permission in LumaBarPermission.allCases {
-                await requestIfNeeded(permission, openSettingsIfNeeded: false)
+            for permission in LumaBarPermission.onboardingCases {
+                await request(permission, jumpToSettings: true)
+                try? await Task.sleep(nanoseconds: 300_000_000)
             }
             refresh()
-            isRequestingAll = false
+            isRequesting = false
         }
     }
 
     func request(_ permission: LumaBarPermission) {
         Task { @MainActor in
-            await requestIfNeeded(permission, openSettingsIfNeeded: true)
+            await request(permission, jumpToSettings: true)
             refresh()
         }
     }
 
     func finish() {
-        refresh()
-        guard allCorePermissionsGranted else { return }
         UserDefaults.standard.set(true, forKey: Self.completionKey)
         onFinished()
     }
 
-    func openAutomationSettings() {
-        openPrivacySettings(anchor: "Privacy_Automation")
-    }
-
-    func openFullDiskAccessSettings() {
-        openPrivacySettings(anchor: "Privacy_AllFiles")
-    }
-
-    private func requestIfNeeded(
-        _ permission: LumaBarPermission,
-        openSettingsIfNeeded: Bool
-    ) async {
-        refresh()
-        if states[permission] == .authorized {
-            return
-        }
-
-        if states[permission] == .denied || states[permission] == .restricted {
-            if openSettingsIfNeeded {
-                openPrivacySettings(anchor: permission.settingsAnchor)
-            }
-            return
-        }
+    private func request(_ permission: LumaBarPermission, jumpToSettings: Bool) async {
+        let current = Self.readSnapshot()[permission] ?? .notDetermined
+        if current.isAuthorized { return }
 
         switch permission {
         case .music:
-            _ = await MusicAuthorization.request()
-        case .microphone:
-            _ = await Self.requestMicrophoneAuthorization()
-        case .speechRecognition:
-            _ = await Self.requestSpeechAuthorization()
-        case .contacts:
-            _ = try? await CNContactStore().requestAccess(for: .contacts)
-        case .screenRecording:
-            let granted = CGRequestScreenCaptureAccess()
-            if !granted, openSettingsIfNeeded {
-                openPrivacySettings(anchor: permission.settingsAnchor)
+            if current == .denied || current == .restricted {
+                if jumpToSettings { openPrivacySettings(for: permission) }
+                return
             }
+            _ = await MusicAuthorization.request()
         case .accessibility:
             let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
             let granted = AXIsProcessTrustedWithOptions(options)
-            if !granted, openSettingsIfNeeded {
-                openPrivacySettings(anchor: permission.settingsAnchor)
+            if !granted, jumpToSettings {
+                openPrivacySettings(for: permission)
             }
-        }
-
-        refresh()
-    }
-
-    private nonisolated static func requestMicrophoneAuthorization() async -> Bool {
-        await withCheckedContinuation { continuation in
-            AVCaptureDevice.requestAccess(for: .audio) { @Sendable granted in
-                continuation.resume(returning: granted)
+        case .screenRecording:
+            let granted = CGRequestScreenCaptureAccess()
+            if !granted, jumpToSettings {
+                openPrivacySettings(for: permission)
             }
         }
     }
 
-    private nonisolated static func requestSpeechAuthorization() async
-        -> SFSpeechRecognizerAuthorizationStatus
-    {
-        await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { @Sendable status in
-                continuation.resume(returning: status)
+    private func openPrivacySettings(for permission: LumaBarPermission) {
+        let candidates = [
+            "x-apple.systempreferences:com.apple.preference.security?\(permission.settingsAnchor)",
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(permission.settingsAnchor)"
+        ]
+        for candidate in candidates {
+            if let url = URL(string: candidate) {
+                NSWorkspace.shared.open(url)
+                return
             }
         }
     }
 
-    private func openPrivacySettings(anchor: String) {
-        guard let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)"
-        ) else { return }
-        NSWorkspace.shared.open(url)
+    private static func readSnapshot() -> [LumaBarPermission: LumaBarPermissionState] {
+        [
+            .music: musicState,
+            .accessibility: AXIsProcessTrusted() ? .authorized : .notDetermined,
+            .screenRecording: CGPreflightScreenCaptureAccess() ? .authorized : .notDetermined
+        ]
     }
 
     private static var musicState: LumaBarPermissionState {
         switch MusicAuthorization.currentStatus {
-        case .notDetermined: .notDetermined
         case .authorized: .authorized
         case .denied: .denied
         case .restricted: .restricted
-        @unknown default: .restricted
-        }
-    }
-
-    private static var microphoneState: LumaBarPermissionState {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .notDetermined: .notDetermined
-        case .authorized: .authorized
-        case .denied: .denied
-        case .restricted: .restricted
-        @unknown default: .restricted
-        }
-    }
-
-    private static var speechState: LumaBarPermissionState {
-        switch SFSpeechRecognizer.authorizationStatus() {
-        case .notDetermined: .notDetermined
-        case .authorized: .authorized
-        case .denied: .denied
-        case .restricted: .restricted
-        @unknown default: .restricted
-        }
-    }
-
-    private static var contactsState: LumaBarPermissionState {
-        switch CNContactStore.authorizationStatus(for: .contacts) {
-        case .notDetermined: .notDetermined
-        case .authorized: .authorized
-        case .denied: .denied
-        case .restricted: .restricted
-        case .limited: .authorized
-        @unknown default: .restricted
+        default: .notDetermined
         }
     }
 }
 
 struct PermissionOnboardingView: View {
     @ObservedObject var model: PermissionOnboardingModel
-
-    private let refreshTimer = Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()
+    private let timer = Timer.publish(every: 0.6, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-
-            ScrollView {
-                VStack(spacing: 10) {
-                    ForEach(LumaBarPermission.allCases) { permission in
-                        PermissionRow(
-                            permission: permission,
-                            state: model.states[permission] ?? .notDetermined,
-                            action: { model.request(permission) }
-                        )
-                    }
-
-                    advancedSettings
-                }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 18)
-            }
-
-            footer
-        }
-        .frame(minWidth: 620, maxWidth: 620, minHeight: 520, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .onReceive(refreshTimer) { _ in model.refresh() }
-    }
-
-    private var header: some View {
-        VStack(spacing: 9) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.orange.opacity(0.92), Color.pink.opacity(0.78)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                Image(systemName: "checkmark.shield.fill")
-                    .font(.system(size: 30, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 62, height: 62)
-
-            Text("一次完成 luma bar 权限设置")
-                .font(.system(size: 24, weight: .bold))
-
-            Text("这些权限只会在首次设置时集中请求。授权后，日常使用不会重复弹窗。")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 24)
-        .padding(.bottom, 18)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
-    }
-
-    private var advancedSettings: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("按用途授权")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-            Text("自动化权限由 macOS 按 Messages、Safari、Chrome 等目标应用分别管理；文件权限也按目录管理。系统不允许应用替用户直接勾选，你可以现在打开对应设置页。")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 10) {
-                Button("自动化设置") { model.openAutomationSettings() }
-                Button("完全磁盘访问") { model.openFullDiskAccessSettings() }
-            }
-            .buttonStyle(.bordered)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-    }
-
-    private var footer: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("已完成 \(model.grantedCount) / \(LumaBarPermission.allCases.count)")
-                    .font(.system(size: 12, weight: .semibold))
-                Text(model.allCorePermissionsGranted ? "所有核心权限已设置" : "请完成全部核心权限后继续")
-                    .font(.system(size: 11))
+            VStack(spacing: 8) {
+                Text("权限设置")
+                    .font(.system(size: 22, weight: .bold))
+                Text("只需这几项。麦克风和通讯录会在你真正用到时再询问。")
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
+            .padding(.top, 28)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 20)
 
-            Spacer()
+            VStack(spacing: 8) {
+                ForEach(LumaBarPermission.onboardingCases) { permission in
+                    let state = model.states[permission] ?? .notDetermined
+                    HStack(spacing: 12) {
+                        Image(systemName: permission.symbolName)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(state.isAuthorized ? Color.green : Color.secondary)
+                            .frame(width: 28)
 
-            Button {
-                model.requestAll()
-            } label: {
-                if model.isRequestingAll {
-                    ProgressView()
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(permission.title)
+                                .font(.system(size: 14, weight: .medium))
+                            Text(permission.hint)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        Text(state.label)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(state.isAuthorized ? Color.green : Color.secondary)
+
+                        Button(state.isAuthorized ? "好" : "开启") {
+                            model.request(permission)
+                        }
+                        .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .frame(width: 92)
-                } else {
-                    Text("一键开始授权")
-                        .frame(width: 92)
+                        .disabled(state.isAuthorized)
+                        .frame(width: 56)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color(nsColor: .controlBackgroundColor))
+                    )
                 }
             }
-            .buttonStyle(.bordered)
-            .disabled(model.isRequestingAll || model.allCorePermissionsGranted)
+            .padding(.horizontal, 24)
 
-            Button("完成并开始使用") {
-                model.finish()
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(!model.allCorePermissionsGranted)
-        }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 16)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.72))
-    }
-}
+            Spacer(minLength: 20)
 
-private struct PermissionRow: View {
-    let permission: LumaBarPermission
-    let state: LumaBarPermissionState
-    let action: () -> Void
-
-    var body: some View {
-        HStack(spacing: 13) {
-            Image(systemName: permission.symbolName)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(state == .authorized ? Color.green : Color.accentColor)
-                .frame(width: 34, height: 34)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill((state == .authorized ? Color.green : Color.accentColor).opacity(0.12))
-                )
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(permission.title)
-                    .font(.system(size: 13, weight: .semibold))
-                Text(permission.detail)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
-            Spacer(minLength: 12)
-
-            Text(state.label)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(state == .authorized ? Color.green : Color.secondary)
-                .frame(width: 58, alignment: .trailing)
-
-            Button(state == .authorized ? "完成" : (state == .notDetermined ? "授权" : "打开设置")) {
-                action()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .frame(width: 76)
-            .disabled(state == .authorized)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .background(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .stroke(state == .authorized ? Color.green.opacity(0.25) : Color.primary.opacity(0.06))
+            HStack(spacing: 12) {
+                Button {
+                    model.requestAll()
+                } label: {
+                    if model.isRequesting {
+                        ProgressView().controlSize(.small).frame(width: 88)
+                    } else {
+                        Text("一键开启").frame(width: 88)
+                    }
                 }
-        )
+                .buttonStyle(.bordered)
+                .disabled(model.isRequesting)
+
+                Button("开始使用") {
+                    model.finish()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.bottom, 24)
+        }
+        .frame(width: 400, height: 380)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onReceive(timer) { _ in model.pollTick() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.syncFromSystemSettings()
+        }
+        .onAppear { model.refresh() }
     }
 }

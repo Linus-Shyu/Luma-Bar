@@ -6,12 +6,17 @@ import Combine
 import Contacts
 import CoreAudio
 import CoreText
+#if !LUMA_APP_STORE
 import CoreWLAN
+#endif
 import Darwin
 import IOKit.ps
+import MusicKit
 import PDFKit
 import QuartzCore
+#if !LUMA_APP_STORE
 import ScreenCaptureKit
+#endif
 import Security
 import SQLite3
 import Speech
@@ -42,6 +47,9 @@ private enum AppController {
     }
 
     private static func stopKeepAliveForCurrentSession() {
+#if LUMA_APP_STORE
+        return
+#else
         let label = "com.lumabar.app.keepalive"
         let plist = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents/\(label).plist")
@@ -54,6 +62,7 @@ private enum AppController {
         ]
         try? process.run()
         process.waitUntilExit()
+    #endif
     }
 }
 
@@ -1561,6 +1570,13 @@ private struct KiroCreditsUsage: Equatable, Sendable {
     }
 }
 
+#if LUMA_APP_STORE
+private enum CodexSessionUsageReader {
+    static func latestSnapshot(previous: CodexTokenUsageSnapshot?) -> CodexTokenUsageSnapshot? { nil }
+    static func taskStates() -> [ExternalTaskState] { [] }
+    static func openAITaskStates() -> [ExternalTaskState] { [] }
+}
+#else
 private enum CodexSessionUsageReader {
     private static let tokenMarker = "\"type\":\"token_count\""
     private static let turnContextMarker = "\"type\":\"turn_context\""
@@ -2060,8 +2076,16 @@ private enum CodexSessionUsageReader {
         return text[lineStart..<lineEnd]
     }
 }
+#endif
 
 
+
+#if LUMA_APP_STORE
+private enum CursorSessionUsageReader {
+    static func latestSnapshot(previous: CodexTokenUsageSnapshot?) -> CodexTokenUsageSnapshot? { nil }
+    static func taskStates() -> [ExternalTaskState] { [] }
+}
+#else
 private enum CursorSessionUsageReader {
     private static let defaultContextWindow = 200_000
 
@@ -2421,7 +2445,15 @@ private enum CursorSessionUsageReader {
         return String(cString: cString)
     }
 }
+#endif
 
+
+#if LUMA_APP_STORE
+private enum KiroSessionUsageReader {
+    static func latestSnapshot(previous: CodexTokenUsageSnapshot?) -> CodexTokenUsageSnapshot? { nil }
+    static func taskStates() -> [ExternalTaskState] { [] }
+}
+#else
 private enum KiroSessionUsageReader {
     private static let syntheticContextWindow = 100_000
 
@@ -2726,6 +2758,8 @@ private enum KiroSessionUsageReader {
         return String(decoding: (try? handle.readToEnd()) ?? Data(), as: UTF8.self)
     }
 }
+#endif
+
 
 /// Official ChatGPT macOS app shares `com.openai.codex` / `~/.codex/sessions` with Codex Desktop.
 /// Sessions classified as desktop/chat are exposed here so reminders say "ChatGPT · …".
@@ -2736,6 +2770,11 @@ private enum ChatGPTSessionUsageReader {
 }
 
 /// Cherry Studio stores agent sessions in `Data/agents.db`, and newer chat topics in `cherrystudio.sqlite`.
+#if LUMA_APP_STORE
+private enum CherryStudioSessionUsageReader {
+    static func taskStates() -> [ExternalTaskState] { [] }
+}
+#else
 private enum CherryStudioSessionUsageReader {
     static func taskStates() -> [ExternalTaskState] {
         var statesByID: [String: ExternalTaskState] = [:]
@@ -2946,6 +2985,8 @@ private enum CherryStudioSessionUsageReader {
         return rows
     }
 }
+#endif
+
 
 private struct KiroSessionFile: Decodable {
     let id: String?
@@ -3791,6 +3832,68 @@ private enum AgentWeatherError: LocalizedError {
     }
 }
 
+#if LUMA_APP_STORE
+@MainActor
+private enum AgentContextProvider {
+    static func capture(
+        processID: pid_t?,
+        bundleIdentifier: String,
+        appName: String,
+        includeFocusedText: Bool
+    ) -> AgentWorkspaceContext {
+        AgentWorkspaceContext(
+            appName: appName,
+            bundleIdentifier: bundleIdentifier,
+            windowTitle: nil,
+            selectedText: nil,
+            focusedText: nil,
+            pageTitle: nil,
+            pageURL: nil,
+            hasAccessibilityAccess: false
+        )
+    }
+
+    static func requestAccessibilityAccess() {}
+
+    static func selectedText(processID: pid_t?) -> String? { nil }
+
+    static func isWindowFullScreen(processID: pid_t?) -> Bool {
+        guard let processID else { return false }
+        let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        let matching = windowList.filter { ($0[kCGWindowOwnerPID as String] as? pid_t) == processID }
+        guard !matching.isEmpty else { return false }
+        let screen = NSScreen.main?.frame ?? .zero
+        return matching.contains { info in
+            guard let bounds = info[kCGWindowBounds as String] as? [String: CGFloat] else { return false }
+            let width = bounds["Width"] ?? 0
+            let height = bounds["Height"] ?? 0
+            return width >= screen.width - 2 && height >= screen.height - 2
+        }
+    }
+
+    static func copySelectedText(
+        processID: pid_t?,
+        completion: @escaping (String?) -> Void
+    ) {
+        completion(nil)
+    }
+
+    static func loadPageText(from url: URL) async -> String? {
+        guard url.scheme == "http" || url.scheme == "https" else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 14
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                return nil
+            }
+            return String(data: data, encoding: .utf8)
+        } catch {
+            return nil
+        }
+    }
+}
+#else
 @MainActor
 private enum AgentContextProvider {
     private struct PasteboardSnapshot {
@@ -4108,6 +4211,8 @@ private enum AgentContextProvider {
         return String(text.prefix(limit)) + "\n[truncated]"
     }
 }
+#endif
+
 
 private enum AgentScreenCaptureError: LocalizedError {
     case permissionRequired
@@ -4126,7 +4231,16 @@ private enum AgentScreenCaptureError: LocalizedError {
     }
 }
 
-@MainActor
+#if LUMA_APP_STORE
+private enum AgentScreenCapture {
+    static func captureWindow(
+        processID: pid_t?,
+        maxLongestEdge: CGFloat = 1280
+    ) async throws -> Data {
+        throw AgentScreenCaptureError.permissionRequired
+    }
+}
+#else
 private enum AgentScreenCapture {
     static func captureWindow(processID: pid_t?) async throws -> Data {
         guard CGPreflightScreenCaptureAccess() else {
@@ -4174,6 +4288,8 @@ private enum AgentScreenCapture {
         return data
     }
 }
+#endif
+
 
 private struct AgentShellResult: Sendable {
     let exitCode: Int32
@@ -4181,6 +4297,17 @@ private struct AgentShellResult: Sendable {
     let timedOut: Bool
 }
 
+#if LUMA_APP_STORE
+private enum AgentShellRunner {
+    static func run(_ command: String) async throws -> AgentShellResult {
+        AgentShellResult(
+            exitCode: 1,
+            output: "Shell commands are unavailable in the Mac App Store edition.",
+            timedOut: false
+        )
+    }
+}
+#else
 private enum AgentShellRunner {
     private static let defaultTimeout: TimeInterval = 120
 
@@ -4289,6 +4416,8 @@ private enum AgentShellRunner {
         return environment
     }
 }
+#endif
+
 
 private struct NetEaseAgentSearchResponse: Decodable {
     let result: NetEaseAgentSearchResult?
@@ -4711,6 +4840,36 @@ private enum LocalMessageParser {
     }
 }
 
+#if LUMA_APP_STORE
+private enum MessagesAgentBridge {
+    enum BridgeError: LocalizedError {
+        case contactsDenied
+        case contactNotFound(String)
+        case noMessageHandle(String)
+        case sendFailed(String)
+        case unavailable
+
+        var errorDescription: String? {
+            switch self {
+            case .contactsDenied:
+                return "需要通讯录权限才能按姓名查找联系人。"
+            case .contactNotFound(let name):
+                return "通讯录里没有找到“\(name)”，请使用完整姓名、手机号或邮箱。"
+            case .noMessageHandle(let name):
+                return "“\(name)”没有可用于信息 App 的手机号或邮箱。"
+            case .sendFailed(let detail):
+                return "信息发送失败：\(detail)"
+            case .unavailable:
+                return "信息自动化在 Mac App Store 版不可用。"
+            }
+        }
+    }
+
+    static func send(_ action: PendingMessageAction) async throws {
+        throw BridgeError.unavailable
+    }
+}
+#else
 private enum MessagesAgentBridge {
     enum BridgeError: LocalizedError {
         case contactsDenied
@@ -4811,6 +4970,8 @@ private enum MessagesAgentBridge {
         throw BridgeError.noMessageHandle(recipient)
     }
 }
+#endif
+
 
 private struct LocalAppAlias {
     let keys: [String]
@@ -5930,10 +6091,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         buildWindows()
         installOutsideClickMonitors()
         installBarHoverMonitors()
-        installSelectionTranslationMonitor()
+        if AppStoreDistribution.allowsSelectionTranslation {
+            installSelectionTranslationMonitor()
+        }
         installEscapeKeyMonitor()
         installSpaceTransitionMonitor()
-        installShellPromptHotKey()
+        if AppStoreDistribution.allowsShellAutomation {
+            installShellPromptHotKey()
+        }
         installVoiceWhisperHotKey()
         installApplicationContextObserver()
         applyLayout()
@@ -7945,14 +8110,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
         let agentMenuItem = NSMenuItem(title: "Agent", action: nil, keyEquivalent: "")
         let agentMenu = NSMenu(title: "Agent")
-        let shellPromptItem = NSMenuItem(
-            title: "Shell Prompt",
-            action: #selector(openShellPromptFromMenu),
-            keyEquivalent: "\r"
-        )
-        shellPromptItem.target = self
-        shellPromptItem.keyEquivalentModifierMask = [.command, .shift]
-        agentMenu.addItem(shellPromptItem)
+        if AppStoreDistribution.allowsShellAutomation {
+            let shellPromptItem = NSMenuItem(
+                title: "Shell Prompt",
+                action: #selector(openShellPromptFromMenu),
+                keyEquivalent: "\r"
+            )
+            shellPromptItem.target = self
+            shellPromptItem.keyEquivalentModifierMask = [.command, .shift]
+            agentMenu.addItem(shellPromptItem)
+        }
         let voiceWhisperItem = NSMenuItem(
             title: "Voice Whisper",
             action: #selector(openVoiceWhisperFromMenu),
@@ -7961,23 +8128,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         voiceWhisperItem.target = self
         voiceWhisperItem.keyEquivalentModifierMask = [.command, .shift]
         agentMenu.addItem(voiceWhisperItem)
-        agentMenu.addItem(.separator())
-        let translateSelectionItem = NSMenuItem(
-            title: "划词翻译（按住 ⌥）",
-            action: #selector(toggleSelectionTranslation),
-            keyEquivalent: ""
-        )
-        translateSelectionItem.target = self
-        translateSelectionItem.state = model.isSelectionTranslationEnabled ? .on : .off
-        agentMenu.addItem(translateSelectionItem)
-        selectionTranslationMenuItem = translateSelectionItem
-        let accessibilityItem = NSMenuItem(
-            title: "Allow Accessibility Access",
-            action: #selector(requestAccessibilityAccessFromMenu),
-            keyEquivalent: ""
-        )
-        accessibilityItem.target = self
-        agentMenu.addItem(accessibilityItem)
+        if AppStoreDistribution.allowsSelectionTranslation {
+            agentMenu.addItem(.separator())
+            let translateSelectionItem = NSMenuItem(
+                title: "划词翻译（按住 ⌥）",
+                action: #selector(toggleSelectionTranslation),
+                keyEquivalent: ""
+            )
+            translateSelectionItem.target = self
+            translateSelectionItem.state = model.isSelectionTranslationEnabled ? .on : .off
+            agentMenu.addItem(translateSelectionItem)
+            selectionTranslationMenuItem = translateSelectionItem
+        }
+        if AppStoreDistribution.allowsAccessibilityFeatures {
+            let accessibilityItem = NSMenuItem(
+                title: "Allow Accessibility Access",
+                action: #selector(requestAccessibilityAccessFromMenu),
+                keyEquivalent: ""
+            )
+            accessibilityItem.target = self
+            agentMenu.addItem(accessibilityItem)
+        }
         agentMenuItem.submenu = agentMenu
         mainMenu.addItem(agentMenuItem)
 
@@ -8065,13 +8236,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         menu.addItem(permissionItem)
         menu.addItem(.separator())
 
-        let shellPromptItem = NSMenuItem(
-            title: "Shell Prompt (⌘⇧↩)",
-            action: #selector(openShellPromptFromMenu),
-            keyEquivalent: ""
-        )
-        shellPromptItem.target = self
-        menu.addItem(shellPromptItem)
+        if AppStoreDistribution.allowsShellAutomation {
+            let shellPromptItem = NSMenuItem(
+                title: "Shell Prompt (⌘⇧↩)",
+                action: #selector(openShellPromptFromMenu),
+                keyEquivalent: ""
+            )
+            shellPromptItem.target = self
+            menu.addItem(shellPromptItem)
+        }
         let voiceWhisperItem = NSMenuItem(
             title: "Voice Whisper (⌘⇧M)",
             action: #selector(openVoiceWhisperFromMenu),
@@ -8079,48 +8252,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         )
         voiceWhisperItem.target = self
         menu.addItem(voiceWhisperItem)
-        let testCursorCompletionItem = NSMenuItem(
-            title: "测试多任务完成提醒",
-            action: #selector(testCursorCompletionFromMenu),
-            keyEquivalent: ""
-        )
-        testCursorCompletionItem.target = self
-        menu.addItem(testCursorCompletionItem)
-        let testContextLimitItem = NSMenuItem(
-            title: "测试上下文极限提醒",
-            action: #selector(testContextLimitFromMenu),
-            keyEquivalent: ""
-        )
-        testContextLimitItem.target = self
-        menu.addItem(testContextLimitItem)
+        if AppStoreDistribution.allowsExternalSessionMonitoring {
+            let testCursorCompletionItem = NSMenuItem(
+                title: "测试多任务完成提醒",
+                action: #selector(testCursorCompletionFromMenu),
+                keyEquivalent: ""
+            )
+            testCursorCompletionItem.target = self
+            menu.addItem(testCursorCompletionItem)
+            let testContextLimitItem = NSMenuItem(
+                title: "测试上下文极限提醒",
+                action: #selector(testContextLimitFromMenu),
+                keyEquivalent: ""
+            )
+            testContextLimitItem.target = self
+            menu.addItem(testContextLimitItem)
+        }
         menu.addItem(.separator())
 
-        let selectionItem = NSMenuItem(
-            title: "划词翻译（按住 ⌥）",
-            action: #selector(toggleSelectionTranslation),
-            keyEquivalent: ""
-        )
-        selectionItem.target = self
-        selectionItem.state = model.isSelectionTranslationEnabled ? .on : .off
-        menu.addItem(selectionItem)
-        statusSelectionTranslationMenuItem = selectionItem
+        if AppStoreDistribution.allowsSelectionTranslation {
+            let selectionItem = NSMenuItem(
+                title: "划词翻译（按住 ⌥）",
+                action: #selector(toggleSelectionTranslation),
+                keyEquivalent: ""
+            )
+            selectionItem.target = self
+            selectionItem.state = model.isSelectionTranslationEnabled ? .on : .off
+            menu.addItem(selectionItem)
+            statusSelectionTranslationMenuItem = selectionItem
+        }
 
-        let licenseItem = NSMenuItem(
-            title: model.licenseStatus.menuTitle,
-            action: #selector(showLicenseFromMenu),
-            keyEquivalent: ""
-        )
-        licenseItem.target = self
-        menu.addItem(licenseItem)
-        statusLicenseMenuItem = licenseItem
+        if AppStoreDistribution.showsLicenseUI {
+            let licenseItem = NSMenuItem(
+                title: model.licenseStatus.menuTitle,
+                action: #selector(showLicenseFromMenu),
+                keyEquivalent: ""
+            )
+            licenseItem.target = self
+            menu.addItem(licenseItem)
+            statusLicenseMenuItem = licenseItem
+        }
 
-        let accessibilityItem = NSMenuItem(
-            title: "Allow Accessibility Access",
-            action: #selector(requestAccessibilityAccessFromMenu),
-            keyEquivalent: ""
-        )
-        accessibilityItem.target = self
-        menu.addItem(accessibilityItem)
+        if AppStoreDistribution.allowsAccessibilityFeatures {
+            let accessibilityItem = NSMenuItem(
+                title: "Allow Accessibility Access",
+                action: #selector(requestAccessibilityAccessFromMenu),
+                keyEquivalent: ""
+            )
+            accessibilityItem.target = self
+            menu.addItem(accessibilityItem)
+        }
 
         menu.addItem(.separator())
         let quitItem = NSMenuItem(
@@ -8274,16 +8455,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         let onboardingModel = PermissionOnboardingModel { [weak self] in
             self?.finishPermissionOnboarding()
         }
+        onboardingModel.onPermissionBecameAuthorized = { [weak self] permission in
+            self?.handlePermissionBecameAuthorized(permission)
+        }
         let contentView = PermissionOnboardingView(model: onboardingModel)
-        let availableHeight = (NSScreen.main?.visibleFrame.height ?? 700) - 36
-        let onboardingHeight = min(650, max(520, availableHeight))
+        let onboardingHeight: CGFloat = 400
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: onboardingHeight),
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: onboardingHeight),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.title = "luma bar Permission Setup"
+        window.title = "权限设置"
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.moveToActiveSpace]
@@ -8302,7 +8485,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         permissionWindow?.orderOut(nil)
         permissionWindow = nil
         permissionOnboardingModel = nil
-        model.scanLocalMusic()
+        applyGrantedCapabilities(forceMusicScan: true, announce: true)
+    }
+
+    private func handlePermissionBecameAuthorized(_ permission: LumaBarPermission) {
+        switch permission {
+        case .music:
+            model.scanLocalMusic()
+        case .accessibility:
+            if AppStoreDistribution.allowsSelectionTranslation {
+                removeSelectionTranslationMonitor()
+                installSelectionTranslationMonitor()
+            }
+            model.requestDesktopPetMessage?("辅助功能已生效，划词翻译可以用了。")
+        case .screenRecording:
+            model.requestDesktopPetMessage?("屏幕录制已授权。")
+        }
+    }
+
+    /// Reload features that depend on TCC after the user grants them in System Settings.
+    private func applyGrantedCapabilities(forceMusicScan: Bool, announce: Bool) {
+        let musicAuthorized = {
+            switch MusicAuthorization.currentStatus {
+            case .authorized: return true
+            default: return false
+            }
+        }()
+
+        if forceMusicScan || musicAuthorized {
+            model.scanLocalMusic()
+        }
+
+        #if !LUMA_APP_STORE
+        if AppStoreDistribution.allowsSelectionTranslation, AXIsProcessTrusted() {
+            removeSelectionTranslationMonitor()
+            installSelectionTranslationMonitor()
+        }
+        #endif
+
+        applyLayout()
+        refreshInteractiveHitRegions()
+
+        if announce {
+            if musicAuthorized {
+                model.requestDesktopPetMessage?("权限已更新，内容正在刷新。")
+            }
+        }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        permissionOnboardingModel?.syncFromSystemSettings()
+        // Users often toggle Accessibility / Screen Recording in Settings then return —
+        // pick up the new TCC state and refresh content without requiring a relaunch.
+        applyGrantedCapabilities(forceMusicScan: false, announce: false)
     }
 
     private func updateThemeMenuState(_ theme: IslandTheme) {
@@ -8381,6 +8616,7 @@ struct NetEaseNowPlaying: Equatable {
     }
 }
 
+#if !LUMA_APP_STORE
 private struct NetEaseJXANowPlayingPayload: Decodable, Sendable {
     let bundleId: String?
     let displayName: String?
@@ -8392,6 +8628,8 @@ private struct NetEaseJXANowPlayingPayload: Decodable, Sendable {
     let playbackRate: Double?
     let timestamp: Double?
 }
+#endif
+
 
 struct NetEasePlaylist: Identifiable, Hashable {
     let id: String
@@ -8426,6 +8664,38 @@ private enum NetEaseRemoteCommand: Int32 {
     case seekToPlaybackPosition = 24
 }
 
+
+#if LUMA_APP_STORE
+private final class NetEaseBridge: @unchecked Sendable {
+    static let shared = NetEaseBridge()
+
+    func fetchNowPlaying(completion: @escaping (NetEaseNowPlaying?) -> Void) {
+        completion(nil)
+    }
+
+    @discardableResult
+    func send(_ command: NetEaseRemoteCommand) -> Bool {
+        false
+    }
+
+    @discardableResult
+    func seek(to position: TimeInterval) -> Bool {
+        false
+    }
+
+    @MainActor
+    func openApplication(activates: Bool) {}
+
+    @MainActor
+    func openTrack(_ url: URL) {}
+
+    @MainActor
+    func openPlaylist(id: String) {}
+
+    @MainActor
+    func openSong(id: String) {}
+}
+#else
 private typealias MediaRemoteDictionaryBlock = @convention(block) (CFDictionary?) -> Void
 private typealias MediaRemotePIDBlock = @convention(block) (Int32) -> Void
 private typealias MediaRemoteGetInfoFunction = @convention(c) (DispatchQueue, AnyObject) -> Void
@@ -8842,6 +9112,8 @@ private final class NetEaseBridge: @unchecked Sendable {
         )
     }
 }
+#endif
+
 
 struct LocalTrack: Identifiable, Hashable {
     let id: URL
@@ -9007,15 +9279,21 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
     }
     @Published var isSelectionTranslationEnabled: Bool = {
+        #if LUMA_APP_STORE
+        false
+        #else
         let defaults = UserDefaults.standard
         let key = "LumaBar.selectionTranslationEnabled"
         return defaults.object(forKey: key) == nil ? true : defaults.bool(forKey: key)
+        #endif
     }() {
         didSet {
+            #if !LUMA_APP_STORE
             UserDefaults.standard.set(
                 isSelectionTranslationEnabled,
                 forKey: "LumaBar.selectionTranslationEnabled"
             )
+            #endif
         }
     }
     @Published private(set) var licenseStatus: LumaLicenseStatus = LumaLicenseManager.currentStatus()
@@ -9185,7 +9463,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var isProActive: Bool {
+        #if LUMA_APP_STORE
+        // App Store lite has no external license; remaining features stay available.
+        true
+        #else
         licenseStatus.isProActive
+        #endif
     }
 
     func refreshLicenseStatus() {
@@ -11178,6 +11461,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     nonisolated private static func sqliteJSON(databaseURL: URL, sql: String) -> Data? {
+#if LUMA_APP_STORE
+        return nil
+#else
         let process = Process()
         let outputPipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
@@ -11194,7 +11480,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         } catch {
             return nil
         }
-    }
+    #endif
+}
 
     nonisolated private static func score(url: URL) -> Int {
         let path = url.path.lowercased()
@@ -11504,6 +11791,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     nonisolated private static func decryptNetEaseMetadata(encoded: String) -> [String: Any]? {
+#if LUMA_APP_STORE
+        return nil
+#else
         guard let encryptedData = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters) else {
             return nil
         }
@@ -11538,7 +11828,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         } catch {
             return nil
         }
-    }
+    #endif
+}
 
     nonisolated private static func firstSidecarLyrics(
         for url: URL,
@@ -13889,6 +14180,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     private func playAppleMusicQuery(_ query: String) {
+#if LUMA_APP_STORE
+        completeAgentLocalResponse(status: "Apple Music", response: "Apple Music 自动化在 Mac App Store 版不可用。")
+        return
+#else
         agentTask?.cancel()
         isAgentStreaming = true
         agentStatus = "Apple Music"
@@ -13945,9 +14240,14 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 self.completeAgentLocalResponse(status: "Music error", response: error.localizedDescription)
             }
         }
-    }
+    #endif
+}
 
     private func sendBrightnessKey(up: Bool) {
+#if LUMA_APP_STORE
+        completeAgentLocalResponse(status: "Brightness", response: "亮度控制在 Mac App Store 版不可用。")
+        return
+#else
         // macOS virtual key codes 0x90/0x91 are brightness up/down.
         let keyCode = CGKeyCode(up ? 0x90 : 0x91)
         guard
@@ -13961,9 +14261,14 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         keyDown.post(tap: CGEventTapLocation.cghidEventTap)
         keyUp.post(tap: CGEventTapLocation.cghidEventTap)
         completeAgentLocalResponse(status: "Brightness", response: up ? "已调高亮度。" : "已调低亮度。")
-    }
+    #endif
+}
 
     private func setWiFiEnabled(_ enabled: Bool) {
+#if LUMA_APP_STORE
+        completeAgentLocalResponse(status: "Wi‑Fi", response: "Wi‑Fi 控制在 Mac App Store 版不可用。")
+        return
+#else
         do {
             guard let interface = CWWiFiClient.shared().interface() else {
                 completeAgentLocalResponse(status: "Wi‑Fi", response: "没有找到 Wi‑Fi 接口。")
@@ -13974,9 +14279,14 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         } catch {
             completeAgentLocalResponse(status: "Wi‑Fi", response: error.localizedDescription)
         }
-    }
+    #endif
+}
 
     private func setDarkModeEnabled(_ enabled: Bool) {
+#if LUMA_APP_STORE
+        completeAgentLocalResponse(status: "Appearance", response: "外观切换在 Mac App Store 版不可用。")
+        return
+#else
         let source = """
         tell application "System Events"
             tell appearance preferences to set dark mode to \(enabled ? "true" : "false")
@@ -13988,16 +14298,22 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             status: "Appearance",
             successMessage: enabled ? "已切换到深色模式。" : "已切换到浅色模式。"
         )
-    }
+    #endif
+}
 
     private func lockMac() {
+#if LUMA_APP_STORE
+        completeAgentLocalResponse(status: "Lock", response: "锁屏在 Mac App Store 版不可用。")
+        return
+#else
         runSmallSystemProcess(
             executable: "/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession",
             arguments: ["-suspend"],
             status: "Lock",
             successMessage: "Mac 已锁定。"
         )
-    }
+    #endif
+}
 
     private func runSmallSystemProcess(
         executable: String,
@@ -14005,6 +14321,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         status: String,
         successMessage: String
     ) {
+#if LUMA_APP_STORE
+        completeAgentLocalResponse(status: status, response: "该系统操作在 Mac App Store 版不可用。")
+        return
+#else
         agentTask?.cancel()
         isAgentStreaming = true
         agentStatus = status
@@ -14035,7 +14355,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 response: result.0 == 0 ? successMessage : (result.1.isEmpty ? "操作失败。" : result.1)
             )
         }
-    }
+    #endif
+}
 
     private static func netEaseMusicSearchQuery(from prompt: String) -> String? {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
