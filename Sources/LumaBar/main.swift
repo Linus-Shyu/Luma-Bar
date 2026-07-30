@@ -194,6 +194,7 @@ enum IslandPanelAction {
     case togglePlayback
     case nextTrack
     case openAgent
+    case openExternalToken
     case agentQuickAction(AgentQuickActionKind)
 }
 
@@ -7795,6 +7796,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                 model.showAgent()
                 pinExpandedPanelFromUserClick(expandIfNeeded: true)
             }
+        case .openExternalToken:
+            model.presentExternalTokenDashboard()
+            pinExpandedPanelFromUserClick(expandIfNeeded: true)
         case .agentQuickAction(let kind):
             if let expandedWindow {
                 activateForUserInteraction(panel: expandedWindow)
@@ -7937,7 +7941,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         let controls = compactMusicControlRects(for: size)
         return [
             (rect: controls.play, action: .togglePlayback),
-            (rect: controls.expand, action: .toggleExpanded),
+            (
+                rect: controls.expand,
+                action: model.isMonitoringExternalTokenUsage ? .openExternalToken : .toggleExpanded
+            ),
             (rect: controls.next, action: .nextTrack)
         ]
     }
@@ -9659,7 +9666,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     var agentModelDisplayName: String {
         let rawName: String
-        if isCodexTokenAutoExpanded {
+        if usesExternalTokenDisplay {
             guard let externalModel = codexTokenUsage?.model else {
                 return "读取模型…"
             }
@@ -9682,7 +9689,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var agentDisplayedTokenTotal: Int {
-        if isCodexTokenAutoExpanded {
+        if usesExternalTokenDisplay {
             return codexTokenUsage?.usage.totalTokens ?? 0
         }
         return isAgentStreaming
@@ -9691,21 +9698,30 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     private var displayedTokenLimit: Int {
-        if isCodexTokenAutoExpanded, let codexTokenUsage {
+        if usesExternalTokenDisplay, let codexTokenUsage {
             return codexTokenUsage.contextWindow
         }
         return agentTokenLimit
     }
 
     private var displayedTokenUsage: AgentTokenUsage {
-        if isCodexTokenAutoExpanded {
+        if usesExternalTokenDisplay {
             return codexTokenUsage?.usage ?? AgentTokenUsage()
         }
         return agentTokenUsage
     }
 
+    /// True while Cursor / Codex / Kiro is frontmost and we are sampling its context window.
+    var isMonitoringExternalTokenUsage: Bool {
+        activeExternalTokenSource != nil
+    }
+
+    private var usesExternalTokenDisplay: Bool {
+        isCodexTokenAutoExpanded || isMonitoringExternalTokenUsage
+    }
+
     var agentTokenProgress: Double {
-        min(1, max(0, Double(agentDisplayedTokenTotal) / Double(displayedTokenLimit)))
+        min(1, max(0, Double(agentDisplayedTokenTotal) / Double(max(1, displayedTokenLimit))))
     }
 
     var agentTokenAccentColor: Color {
@@ -9730,7 +9746,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         if agentTokenProgress >= 0.70 {
             return Color(red: 1.0, green: 0.76, blue: 0.26)
         }
-        return isCodexTokenAutoExpanded ? Color.islandGreen : themeTokenFallbackColor
+        return usesExternalTokenDisplay ? Color.islandGreen : themeTokenFallbackColor
     }
 
     private var themeTokenFallbackColor: Color {
@@ -9754,7 +9770,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var agentTokenStateText: String {
-        if isCodexTokenAutoExpanded {
+        if usesExternalTokenDisplay {
             let source = codexTokenUsage?.source ?? activeExternalTokenSource
             return codexTokenUsage == nil
                 ? (source?.readingLabel ?? "Reading context")
@@ -12336,23 +12352,11 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 return
             }
 
-            guard Date() >= suppressAutomaticExpansionUntil else {
-                activeExternalTokenSource = tokenSource
-                refreshCodexTokenUsage(force: false)
-                return
-            }
-
-            let isEnteringTokenOverlay = !isCodexTokenAutoExpanded || activeExternalTokenSource != tokenSource
-            if isEnteringTokenOverlay, activeMode != .token {
-                modeBeforeCodexTokenExpansion = activeMode
-            }
+            // Monitor Cursor/Codex/Kiro usage in the background, but do not steal the
+            // music (or other) compact UI just because that IDE became frontmost.
+            let sourceChanged = activeExternalTokenSource != tokenSource
             activeExternalTokenSource = tokenSource
-            isCodexTokenAutoExpanded = true
-            activeMode = .token
-            if isEnteringTokenOverlay || !isExpanded {
-                isExpanded = true
-            }
-            refreshCodexTokenUsage(force: isEnteringTokenOverlay)
+            refreshCodexTokenUsage(force: sourceChanged)
             return
         }
 
@@ -12363,6 +12367,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             activeExternalTokenSource = nil
             isExpanded = false
             activeMode = modeBeforeCodexTokenExpansion
+        } else if activeExternalTokenSource != nil {
+            activeExternalTokenSource = nil
         }
 
         switch context {
@@ -12375,9 +12381,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 refreshNetEaseNowPlaying(force: true)
             }
         case .coding:
-            if activeMode != .system {
-                activeMode = .system
-            }
+            // Keep the user's current island mode (music / agent / system).
+            // Coding apps should not force System and hide playback controls.
+            break
         case .writing, .reading, .gaming:
             if activeMode != .agent {
                 activeMode = .agent
@@ -12588,16 +12594,35 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         lastCodexTokenAlertLevel = level
 
         switch level {
+        case 1:
+            break
         case 2:
             requestDesktopPetMessage?(snapshot.source.nearLimitMessage)
+            presentTokenOverlayIfNeeded(expand: false)
         case 3:
             requestDesktopPetMessage?("上下文已经接近上限，建议总结当前任务或开新 task。")
-            if isCodexTokenAutoExpanded, !isExpanded, Date() >= suppressAutomaticExpansionUntil {
-                isExpanded = true
-            }
+            presentTokenOverlayIfNeeded(expand: Date() >= suppressAutomaticExpansionUntil)
         default:
             break
         }
+    }
+
+    private func presentTokenOverlayIfNeeded(expand: Bool) {
+        guard activeExternalTokenSource != nil || codexTokenUsage != nil else { return }
+        if !isCodexTokenAutoExpanded {
+            if activeMode != .token {
+                modeBeforeCodexTokenExpansion = activeMode
+            }
+            isCodexTokenAutoExpanded = true
+            activeMode = .token
+        }
+        if expand {
+            isExpanded = true
+        }
+    }
+
+    func presentExternalTokenDashboard() {
+        presentTokenOverlayIfNeeded(expand: true)
     }
 
     private func refreshExternalTaskStates(force: Bool) {
@@ -16710,13 +16735,32 @@ struct CompactRightView: View {
                     .help(model.displayedIsPlaying ? "Pause" : "Play")
 
                     Button {
-                        model.isExpanded.toggle()
+                        if model.isMonitoringExternalTokenUsage {
+                            model.presentExternalTokenDashboard()
+                        } else {
+                            model.isExpanded.toggle()
+                        }
                     } label: {
-                        ProgressRing(progress: model.displayedProgress, active: model.displayedIsPlaying)
+                        if model.isMonitoringExternalTokenUsage {
+                            TokenUsageGauge(
+                                progress: model.agentTokenProgress,
+                                label: "AI",
+                                accent: model.agentTokenAccentColor
+                            )
                             .frame(width: 24, height: 24)
+                        } else {
+                            ProgressRing(progress: model.displayedProgress, active: model.displayedIsPlaying)
+                                .frame(width: 24, height: 24)
+                        }
                     }
                     .buttonStyle(.plain)
-                    .help("Open player")
+                    .help(
+                        model.isMonitoringExternalTokenUsage
+                            ? "Open \(model.externalTokenBrandLabel) · \(model.agentTokenPercentText)"
+                            : "Open player"
+                    )
+                    .animation(.easeInOut(duration: 0.2), value: model.agentTokenProgress)
+                    .animation(.easeInOut(duration: 0.16), value: model.isMonitoringExternalTokenUsage)
 
                     Button {
                         model.nextTrack()
