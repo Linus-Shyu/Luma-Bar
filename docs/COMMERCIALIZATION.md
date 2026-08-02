@@ -104,13 +104,10 @@ Surge 结构保留，但 **首购直接用「一杯奶茶～一顿简餐」价**
 ### 必备动作
 1. **Apple Developer Program** + **Developer ID Application** 证书  
 2. `notarize` + `stapler` 后发 DMG（用户下载双击即可，少右键打开）  
-3. 官网购买页（可先用 Lemon Squeezy / Paddle / Stripe Payment Link）  
-4. License Server（可先极简）：
-   - 发行 license key  
-   - 激活 / 停用 / 设备数校验  
-   - 返回：`plan`, `device_limit`, `maintenance_expires_at`, `signature`  
-5. App 内「许可证」面板（菜单栏 → License…）  
-6. 知识库 FAQ：为何不上架、试用规则、续费、设备转移（Surge KB 结构可直接仿）
+3. ~~官网购买页（Lemon Squeezy / Paddle / Stripe）~~ — 已放弃自建收款；转向 App Store / IAP 评估  
+4. ~~License Server~~ — 已移除  
+5. ~~App 内许可证面板~~ — 已移除  
+6. 知识库 FAQ：安装、权限、为何考虑 App Store
 
 ### 更新策略（对标 FUS）
 - 维护期内：Sparkle 推送功能更新。  

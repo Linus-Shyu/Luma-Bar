@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Required for microphone / Voice Whisper under Hardened Runtime. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<!-- Allow Agent / automation Apple Events when signed with Hardened Runtime. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<!-- Explicit client networking for iTunes / lrclib artwork & lyrics fallbacks. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>

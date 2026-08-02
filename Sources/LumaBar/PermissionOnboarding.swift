@@ -1,22 +1,19 @@
 import AppKit
 import ApplicationServices
-import MusicKit
 import SwiftUI
 
 enum LumaBarPermission: String, CaseIterable, Identifiable {
-    case music
     case accessibility
     case screenRecording
 
     var id: String { rawValue }
 
     static var onboardingCases: [LumaBarPermission] {
-        [.music, .accessibility, .screenRecording]
+        [.accessibility, .screenRecording]
     }
 
     var title: String {
         switch self {
-        case .music: "媒体资料库"
         case .accessibility: "辅助功能"
         case .screenRecording: "屏幕录制"
         }
@@ -24,7 +21,6 @@ enum LumaBarPermission: String, CaseIterable, Identifiable {
 
     var hint: String {
         switch self {
-        case .music: "播放本地音乐"
         case .accessibility: "划词翻译需要"
         case .screenRecording: "截图分析需要（可后开）"
         }
@@ -32,7 +28,6 @@ enum LumaBarPermission: String, CaseIterable, Identifiable {
 
     var symbolName: String {
         switch self {
-        case .music: "music.note.list"
         case .accessibility: "accessibility"
         case .screenRecording: "rectangle.dashed.badge.record"
         }
@@ -40,7 +35,6 @@ enum LumaBarPermission: String, CaseIterable, Identifiable {
 
     var settingsAnchor: String {
         switch self {
-        case .music: "Privacy_Media"
         case .accessibility: "Privacy_Accessibility"
         case .screenRecording: "Privacy_ScreenCapture"
         }
@@ -144,12 +138,6 @@ final class PermissionOnboardingModel: ObservableObject {
         if current.isAuthorized { return }
 
         switch permission {
-        case .music:
-            if current == .denied || current == .restricted {
-                if jumpToSettings { openPrivacySettings(for: permission) }
-                return
-            }
-            _ = await MusicAuthorization.request()
         case .accessibility:
             let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
             let granted = AXIsProcessTrustedWithOptions(options)
@@ -179,19 +167,9 @@ final class PermissionOnboardingModel: ObservableObject {
 
     private static func readSnapshot() -> [LumaBarPermission: LumaBarPermissionState] {
         [
-            .music: musicState,
             .accessibility: AXIsProcessTrusted() ? .authorized : .notDetermined,
             .screenRecording: CGPreflightScreenCaptureAccess() ? .authorized : .notDetermined
         ]
-    }
-
-    private static var musicState: LumaBarPermissionState {
-        switch MusicAuthorization.currentStatus {
-        case .authorized: .authorized
-        case .denied: .denied
-        case .restricted: .restricted
-        default: .notDetermined
-        }
     }
 }
 

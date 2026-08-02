@@ -11,7 +11,6 @@ import CoreWLAN
 #endif
 import Darwin
 import IOKit.ps
-import MusicKit
 import PDFKit
 import QuartzCore
 #if !LUMA_APP_STORE
@@ -23,6 +22,73 @@ import Speech
 import SwiftUI
 
 private let netEaseMusicBundleIdentifier = "com.netease.163music"
+private let appleMusicBundleIdentifier = "com.apple.Music"
+
+/// Bundle-ID targeted transport — never NX_KEYTYPE / global MediaRemote broadcasts.
+enum ExclusiveAudioFocus {
+    /// Synchronous AppleScript pause aimed at one app only.
+    nonisolated static func pauseApplication(bundleIdentifier: String) {
+        let script = """
+        tell application id "\(bundleIdentifier)"
+          try
+            pause
+          end try
+        end tell
+        """
+        var error: NSDictionary?
+        NSAppleScript(source: script)?.executeAndReturnError(&error)
+    }
+
+    /// Synchronous AppleScript play aimed at one app only.
+    nonisolated static func playApplication(bundleIdentifier: String) {
+        let script = """
+        tell application id "\(bundleIdentifier)"
+          try
+            play
+          end try
+        end tell
+        """
+        var error: NSDictionary?
+        NSAppleScript(source: script)?.executeAndReturnError(&error)
+    }
+
+    /// Synchronous AppleScript playpause aimed at one app only.
+    nonisolated static func playPauseApplication(bundleIdentifier: String) {
+        let script = """
+        tell application id "\(bundleIdentifier)"
+          try
+            playpause
+          end try
+        end tell
+        """
+        var error: NSDictionary?
+        NSAppleScript(source: script)?.executeAndReturnError(&error)
+    }
+
+    nonisolated static func pauseAppleMusic() {
+        pauseApplication(bundleIdentifier: appleMusicBundleIdentifier)
+    }
+
+    nonisolated static func pauseNetEase() {
+        pauseApplication(bundleIdentifier: netEaseMusicBundleIdentifier)
+    }
+
+    nonisolated static func playAppleMusic() {
+        playApplication(bundleIdentifier: appleMusicBundleIdentifier)
+    }
+
+    nonisolated static func playNetEase() {
+        playApplication(bundleIdentifier: netEaseMusicBundleIdentifier)
+    }
+
+    nonisolated static func playPauseAppleMusic() {
+        playPauseApplication(bundleIdentifier: appleMusicBundleIdentifier)
+    }
+
+    nonisolated static func playPauseNetEase() {
+        playPauseApplication(bundleIdentifier: netEaseMusicBundleIdentifier)
+    }
+}
 
 private enum NotchMetrics {
     static let compactHeight: CGFloat = 32
@@ -30,13 +96,23 @@ private enum NotchMetrics {
     static let compactRightWidth: CGFloat = 134
     static let notchEdgeOverlap: CGFloat = 10
     static let fallbackCameraGap: CGFloat = 72
-    static let expandedSize = NSSize(width: 560, height: 352)
+    /// One expanded size for Music / System / Agent (room for a usable track list).
+    static let expandedSize = NSSize(width: 460, height: 340)
+    static let expandedMusicSize = expandedSize
+    static let expandedSystemSize = expandedSize
+    static let expandedAgentSize = expandedSize
     static let codexTokenExpandedSize = NSSize(width: 420, height: 118)
     static let kiroTokenExpandedSize = NSSize(width: 420, height: 168)
-    static let expandedCornerRadius: CGFloat = 20
+    static let expandedCornerRadius: CGFloat = 18
     static let codexTokenCornerRadius: CGFloat = 26
     static let expandedTopInset: CGFloat = 42
     static let expandedVisualOffsetX: CGFloat = 0
+    /// Matches MusicExpandedView header: pad + row height used for hit testing.
+    static let expandedHeaderPadding: CGFloat = 10
+    static let expandedHeaderRowHeight: CGFloat = 34
+    static let expandedCollapseButton: CGFloat = 28
+    static let expandedModePillWidth: CGFloat = 30
+    static let expandedModePillSpacing: CGFloat = 4
 }
 
 @MainActor
@@ -194,6 +270,9 @@ enum IslandPanelAction {
     case togglePlayback
     case nextTrack
     case openAgent
+    case showMusic
+    case showSystem
+    case showAgentMode
     case openExternalToken
     case agentQuickAction(AgentQuickActionKind)
 }
@@ -340,6 +419,10 @@ enum IslandTheme: String, CaseIterable {
         case .bar, .mistBlue, .pixelCat, .liquidGlass: return false
         }
     }
+
+    /// Formerly true for glass themes that used NSVisualEffectView.
+    /// Always false now — backgrounds are hardcoded layer colors only.
+    var usesBackdropMaterial: Bool { false }
 
     var fontDesign: Font.Design {
         isPixelStyled && !isPixelCat ? .monospaced : .rounded
@@ -1602,13 +1685,6 @@ private struct KiroCreditsUsage: Equatable, Sendable {
     }
 }
 
-#if LUMA_APP_STORE
-private enum CodexSessionUsageReader {
-    static func latestSnapshot(previous: CodexTokenUsageSnapshot?) -> CodexTokenUsageSnapshot? { nil }
-    static func taskStates() -> [ExternalTaskState] { [] }
-    static func openAITaskStates() -> [ExternalTaskState] { [] }
-}
-#else
 private enum CodexSessionUsageReader {
     private static let tokenMarker = "\"type\":\"token_count\""
     private static let turnContextMarker = "\"type\":\"turn_context\""
@@ -1690,6 +1766,16 @@ private enum CodexSessionUsageReader {
     }
 
     private static func sessionRoots() -> [URL] {
+        #if LUMA_APP_STORE
+        var roots: [URL] = []
+        if let home = SecurityScopedBookmarks.resolvedURL(for: .codexHome) {
+            let started = home.startAccessingSecurityScopedResource()
+            defer { if started { home.stopAccessingSecurityScopedResource() } }
+            roots.append(home.appendingPathComponent("sessions", isDirectory: true))
+        }
+        var seen = Set<String>()
+        return roots.filter { seen.insert($0.standardizedFileURL.path).inserted }
+        #else
         let fileManager = FileManager.default
         var roots: [URL] = []
         if let customHome = ProcessInfo.processInfo.environment["CODEX_HOME"]?
@@ -1707,6 +1793,7 @@ private enum CodexSessionUsageReader {
         )
         var seen = Set<String>()
         return roots.filter { seen.insert($0.standardizedFileURL.path).inserted }
+        #endif
     }
 
     private static func taskState(from url: URL, modifiedAt: Date) -> ExternalTaskState? {
@@ -2108,16 +2195,7 @@ private enum CodexSessionUsageReader {
         return text[lineStart..<lineEnd]
     }
 }
-#endif
 
-
-
-#if LUMA_APP_STORE
-private enum CursorSessionUsageReader {
-    static func latestSnapshot(previous: CodexTokenUsageSnapshot?) -> CodexTokenUsageSnapshot? { nil }
-    static func taskStates() -> [ExternalTaskState] { [] }
-}
-#else
 private enum CursorSessionUsageReader {
     private static let defaultContextWindow = 200_000
 
@@ -2307,6 +2385,16 @@ private enum CursorSessionUsageReader {
     }
 
     private static func databaseURLs() -> [URL] {
+        #if LUMA_APP_STORE
+        guard let support = SecurityScopedBookmarks.resolvedURL(for: .cursorApplicationSupport) else {
+            return []
+        }
+        let started = support.startAccessingSecurityScopedResource()
+        defer { if started { support.stopAccessingSecurityScopedResource() } }
+        return [
+            support.appendingPathComponent("User/globalStorage/state.vscdb")
+        ]
+        #else
         let support = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support", isDirectory: true)
         let applicationSupportNames = [
@@ -2320,6 +2408,7 @@ private enum CursorSessionUsageReader {
                 .appendingPathComponent($0, isDirectory: true)
                 .appendingPathComponent("User/globalStorage/state.vscdb")
         }
+        #endif
     }
 
     private static func latestSnapshot(
@@ -2477,15 +2566,7 @@ private enum CursorSessionUsageReader {
         return String(cString: cString)
     }
 }
-#endif
 
-
-#if LUMA_APP_STORE
-private enum KiroSessionUsageReader {
-    static func latestSnapshot(previous: CodexTokenUsageSnapshot?) -> CodexTokenUsageSnapshot? { nil }
-    static func taskStates() -> [ExternalTaskState] { [] }
-}
-#else
 private enum KiroSessionUsageReader {
     private static let syntheticContextWindow = 100_000
 
@@ -2790,8 +2871,6 @@ private enum KiroSessionUsageReader {
         return String(decoding: (try? handle.readToEnd()) ?? Data(), as: UTF8.self)
     }
 }
-#endif
-
 
 /// Official ChatGPT macOS app shares `com.openai.codex` / `~/.codex/sessions` with Codex Desktop.
 /// Sessions classified as desktop/chat are exposed here so reminders say "ChatGPT · …".
@@ -2802,11 +2881,6 @@ private enum ChatGPTSessionUsageReader {
 }
 
 /// Cherry Studio stores agent sessions in `Data/agents.db`, and newer chat topics in `cherrystudio.sqlite`.
-#if LUMA_APP_STORE
-private enum CherryStudioSessionUsageReader {
-    static func taskStates() -> [ExternalTaskState] { [] }
-}
-#else
 private enum CherryStudioSessionUsageReader {
     static func taskStates() -> [ExternalTaskState] {
         var statesByID: [String: ExternalTaskState] = [:]
@@ -3017,8 +3091,6 @@ private enum CherryStudioSessionUsageReader {
         return rows
     }
 }
-#endif
-
 
 private struct KiroSessionFile: Decodable {
     let id: String?
@@ -4332,10 +4404,14 @@ private struct AgentShellResult: Sendable {
 #if LUMA_APP_STORE
 private enum AgentShellRunner {
     static func run(_ command: String) async throws -> AgentShellResult {
-        AgentShellResult(
-            exitCode: 1,
-            output: "Shell commands are unavailable in the Mac App Store edition.",
-            timedOut: false
+        let action = SafeAgentActions.parse(command: command)
+        let result = await MainActor.run {
+            SafeAgentActions.execute(action)
+        }
+        return AgentShellResult(
+            exitCode: result.exitCode,
+            output: result.output,
+            timedOut: result.timedOut
         )
     }
 }
@@ -5844,8 +5920,156 @@ final class IslandPanel: NSPanel {
     var immediateActions: [(rect: NSRect, action: IslandPanelAction)] = []
     weak var actionHandler: IslandPanelActionHandling?
 
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
+    /// Never become key/main — focus transitions flip AppKit into the gray inactive render path.
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+
+    /// Never allow AppKit to flip these panels opaque during drag / Space / edge crossing.
+    override var isOpaque: Bool {
+        get { false }
+        set { super.isOpaque = false }
+    }
+
+    override var hasShadow: Bool {
+        get { false }
+        set { super.hasShadow = false }
+    }
+
+    override var backgroundColor: NSColor! {
+        get { .clear }
+        set { super.backgroundColor = .clear }
+    }
+
+    override init(
+        contentRect: NSRect,
+        styleMask style: NSWindow.StyleMask,
+        backing backingStoreType: NSWindow.BackingStoreType,
+        defer flag: Bool
+    ) {
+        super.init(
+            contentRect: contentRect,
+            styleMask: [.borderless, .fullSizeContentView, .nonactivatingPanel],
+            backing: backingStoreType,
+            defer: flag
+        )
+        lockTransparentRenderChrome(stripFallbacks: true)
+    }
+
+    override var contentView: NSView? {
+        get { super.contentView }
+        set {
+            super.contentView = newValue
+            lockTransparentRenderChrome(stripFallbacks: true)
+        }
+    }
+
+    /// Hard lock — re-applied whenever AppKit tries to mutate chrome during Spaces / drag.
+    /// Reentrancy-guarded: strip/display must never call back into this during a lock pass.
+    private var isLockingTransparentChrome = false
+
+    func lockTransparentRenderChrome(stripFallbacks: Bool = false) {
+        guard !isLockingTransparentChrome else { return }
+        isLockingTransparentChrome = true
+        defer { isLockingTransparentChrome = false }
+
+        if isOpaque { super.isOpaque = false }
+        if backgroundColor != .clear { super.backgroundColor = .clear }
+        if hasShadow { super.hasShadow = false }
+        if hidesOnDeactivate { hidesOnDeactivate = false }
+        if animationBehavior != .none { animationBehavior = .none }
+        if abs(alphaValue - 1) > 0.001 { super.alphaValue = 1 }
+        if !isExcludedFromWindowsMenu { isExcludedFromWindowsMenu = true }
+        let desiredMask: NSWindow.StyleMask = [.borderless, .fullSizeContentView, .nonactivatingPanel]
+        if styleMask != desiredMask {
+            styleMask = desiredMask
+        }
+        if !becomesKeyOnlyIfNeeded { becomesKeyOnlyIfNeeded = true }
+        let desiredBehavior: NSWindow.CollectionBehavior = [
+            .canJoinAllSpaces,
+            .fullScreenAuxiliary,
+            .ignoresCycle
+        ]
+        if collectionBehavior != desiredBehavior {
+            collectionBehavior = desiredBehavior
+        }
+        if #available(macOS 15.0, *) {
+            if responds(to: Selector(("setAllowsAutomaticWindowTiling:"))) {
+                setValue(false, forKey: "allowsAutomaticWindowTiling")
+            }
+        }
+        if tabbingMode != .disallowed { tabbingMode = .disallowed }
+        if level.rawValue < NSWindow.Level.statusBar.rawValue {
+            level = .statusBar
+        }
+        installLayerBackedClearContent()
+        // Full tree strip is expensive and was spinning the main thread when called
+        // from the 5Hz visibility timer via orderFrontRegardless — only on attach.
+        if stripFallbacks {
+            stripAppKitGrayFallbackViews()
+        }
+    }
+
+    /// Force layer-backed clear content so WindowServer never composites an opaque window plate.
+    private func installLayerBackedClearContent() {
+        guard let contentView else { return }
+        contentView.wantsLayer = true
+        contentView.layer?.backgroundColor = NSColor.clear.cgColor
+        contentView.layer?.isOpaque = false
+        contentView.layer?.masksToBounds = false
+        if let themeFrame = contentView.superview {
+            themeFrame.wantsLayer = true
+            themeFrame.layer?.backgroundColor = NSColor.clear.cgColor
+            themeFrame.layer?.isOpaque = false
+        }
+    }
+
+    /// Remove / neutralize AppKit views that paint the inactive gray mask.
+    func stripAppKitGrayFallbackViews() {
+        guard let root = contentView?.superview ?? contentView else { return }
+        Self.stripGrayFallback(in: root)
+        installLayerBackedClearContent()
+    }
+
+    private static func stripGrayFallback(in view: NSView) {
+        let className = NSStringFromClass(type(of: view))
+        // Known AppKit chrome that paints the inactive gray plate behind borderless panels.
+        let isFallbackMask =
+            className.contains("NSTitlebarView")
+            || className.contains("NSTitlebarContainerView")
+            || className.contains("NSWindowBackground")
+            || className.hasSuffix("WindowBackgroundView")
+        if isFallbackMask {
+            view.isHidden = true
+            view.alphaValue = 0
+            view.wantsLayer = true
+            view.layer?.backgroundColor = NSColor.clear.cgColor
+            view.layer?.isOpaque = false
+        }
+
+        // Kill any leftover system material views — never let AppKit gray-composite them.
+        if view is NSVisualEffectView {
+            view.isHidden = true
+            view.alphaValue = 0
+            view.wantsLayer = true
+            view.layer?.backgroundColor = NSColor.clear.cgColor
+            view.layer?.isOpaque = false
+        }
+
+        // Do not rewrite every SwiftUI subview layer — that thrashs layout on the visibility timer.
+        for child in view.subviews {
+            stripGrayFallback(in: child)
+        }
+    }
+
+    override func orderFront(_ sender: Any?) {
+        lockTransparentRenderChrome()
+        super.orderFront(sender)
+    }
+
+    override func orderFrontRegardless() {
+        lockTransparentRenderChrome()
+        super.orderFrontRegardless()
+    }
 
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown,
@@ -5870,8 +6094,8 @@ final class IslandPanel: NSPanel {
                 return
             }
 
-            NSApp.activate(ignoringOtherApps: true)
-            makeKey()
+            // Do not makeKey — canBecomeKey is false so focus never changes glass style.
+            lockTransparentRenderChrome()
         }
 
         super.sendEvent(event)
@@ -5881,6 +6105,24 @@ final class IslandPanel: NSPanel {
 final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
+    }
+
+    override var isOpaque: Bool { false }
+
+    override var allowsVibrancy: Bool { false }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.isOpaque = false
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.isOpaque = false
     }
 }
 
@@ -5966,25 +6208,201 @@ private final class GlobalHotKey: @unchecked Sendable {
     }
 }
 
-struct VisualEffectBackground: NSViewRepresentable {
-    let material: NSVisualEffectView.Material
-    let blendingMode: NSVisualEffectView.BlendingMode
-    var isEmphasized: Bool = true
+/// Posted by AppDelegate around Space transitions. `userInfo["visible"]` is Bool;
+/// optional `userInfo["isDark"]` picks cover color.
+extension Notification.Name {
+    static let lumaBarSpaceTransitionGlassCover = Notification.Name(
+        "com.lumabar.app.spaceTransitionGlassCover"
+    )
+}
 
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = material
-        view.blendingMode = blendingMode
-        view.state = .active
-        view.isEmphasized = isEmphasized
+/// Hardcoded layer fill — no NSVisualEffectView / system materials (those gray out on unfocus).
+struct VisualEffectBackground: NSViewRepresentable {
+    /// Legacy unused — call sites still pass material/blending; ignored.
+    var material: NSVisualEffectView.Material = .hudWindow
+    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+    var isEmphasized: Bool = true
+    var appearanceName: NSAppearance.Name? = nil
+    var cornerRadius: CGFloat = 0
+    /// Fixed tint that never changes with focus, Spaces, or inactive state.
+    var fillColor: NSColor = NSColor.black.withAlphaComponent(0.2)
+
+    func makeNSView(context: Context) -> LockedClearBackgroundView {
+        let view = LockedClearBackgroundView()
+        apply(to: view)
         return view
     }
 
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        view.material = material
-        view.blendingMode = blendingMode
-        view.state = .active
-        view.isEmphasized = isEmphasized
+    func updateNSView(_ view: LockedClearBackgroundView, context: Context) {
+        apply(to: view)
+    }
+
+    private func apply(to view: LockedClearBackgroundView) {
+        view.cornerRadius = cornerRadius
+        view.fillColor = fillColor
+        view.lockFixedLayer()
+        _ = material
+        _ = blendingMode
+        _ = isEmphasized
+        _ = appearanceName
+    }
+}
+
+/// Plain layer-backed view with a fixed background color — never vibrancy / material.
+final class LockedClearBackgroundView: NSView {
+    var fillColor: NSColor = NSColor.black.withAlphaComponent(0.2)
+    var cornerRadius: CGFloat = 0
+
+    /// Flat cover while Spaces animate (solid paint only — not system blur).
+    private let spaceTransitionCover: NSView = {
+        let view = NSView(frame: .zero)
+        view.wantsLayer = true
+        view.layer?.masksToBounds = true
+        view.isHidden = true
+        view.autoresizingMask = [.width, .height]
+        return view
+    }()
+
+    private nonisolated(unsafe) var spaceCoverObserver: NSObjectProtocol?
+
+    override var allowsVibrancy: Bool { false }
+    override var isOpaque: Bool { false }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        commonInit()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        commonInit()
+    }
+
+    private func commonInit() {
+        wantsLayer = true
+        lockFixedLayer()
+        spaceTransitionCover.frame = bounds
+        addSubview(spaceTransitionCover)
+
+        spaceCoverObserver = NotificationCenter.default.addObserver(
+            forName: .lumaBarSpaceTransitionGlassCover,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let visible = (notification.userInfo?["visible"] as? Bool) ?? false
+            let isDark = (notification.userInfo?["isDark"] as? Bool)
+            DispatchQueue.main.async {
+                self?.setSpaceTransitionCoverVisible(visible, isDark: isDark)
+            }
+        }
+    }
+
+    deinit {
+        if let spaceCoverObserver {
+            NotificationCenter.default.removeObserver(spaceCoverObserver)
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        spaceTransitionCover.frame = bounds
+        spaceTransitionCover.layer?.cornerRadius = cornerRadius
+        spaceTransitionCover.layer?.cornerCurve = .continuous
+        lockFixedLayer()
+    }
+
+    /// Idempotent layer paint — never sets `needsDisplay` (that re-enters `updateLayer` forever).
+    func lockFixedLayer() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        wantsLayer = true
+        layerUsesCoreImageFilters = false
+        if let layer {
+            layer.backgroundColor = fillColor.cgColor
+            layer.isOpaque = false
+            layer.masksToBounds = cornerRadius > 0
+            layer.cornerRadius = cornerRadius
+            layer.cornerCurve = .continuous
+        }
+        CATransaction.commit()
+    }
+
+    func setSpaceTransitionCoverVisible(_ visible: Bool, isDark: Bool? = nil) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        spaceTransitionCover.layer?.cornerRadius = cornerRadius
+        spaceTransitionCover.layer?.cornerCurve = .continuous
+        spaceTransitionCover.layer?.backgroundColor = Self.coverColor(isDark: isDark).cgColor
+        spaceTransitionCover.frame = bounds
+        spaceTransitionCover.isHidden = !visible
+        if visible {
+            spaceTransitionCover.layer?.zPosition = 10_000
+            addSubview(spaceTransitionCover)
+        }
+        CATransaction.commit()
+    }
+
+    private static func coverColor(isDark: Bool?) -> NSColor {
+        let dark: Bool
+        if let isDark {
+            dark = isDark
+        } else {
+            dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
+        return dark
+            ? NSColor(srgbRed: 0.165, green: 0.165, blue: 0.165, alpha: 1)
+            : NSColor(srgbRed: 0.96, green: 0.96, blue: 0.97, alpha: 1)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Only lock this view's layer — do NOT call panel.lockTransparentRenderChrome()
+        // here (that re-enters strip/display during window attach and spins the CPU).
+        lockFixedLayer()
+    }
+
+    override func updateLayer() {
+        // Apply fixed fill without marking needsDisplay again.
+        if let layer {
+            layer.backgroundColor = fillColor.cgColor
+            layer.isOpaque = false
+        }
+        super.updateLayer()
+    }
+}
+
+/// Shared chrome so island panels stay transparent while dragged across edges / Spaces.
+@MainActor
+private func configureIslandWindowChrome(_ window: NSWindow, level: NSWindow.Level? = nil) {
+    if let panel = window as? IslandPanel {
+        panel.lockTransparentRenderChrome()
+    } else {
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.hidesOnDeactivate = false
+        window.animationBehavior = .none
+        window.alphaValue = 1
+        if let panel = window as? NSPanel {
+            panel.styleMask = [.borderless, .fullSizeContentView, .nonactivatingPanel]
+            panel.becomesKeyOnlyIfNeeded = true
+        }
+        window.collectionBehavior = [
+            .canJoinAllSpaces,
+            .fullScreenAuxiliary,
+            .ignoresCycle
+        ]
+        if #available(macOS 15.0, *) {
+            if window.responds(to: Selector(("setAllowsAutomaticWindowTiling:"))) {
+                window.setValue(false, forKey: "allowsAutomaticWindowTiling")
+            }
+        }
+        window.tabbingMode = .disallowed
+    }
+    if let level {
+        window.level = level
+    } else if window.level.rawValue < NSWindow.Level.statusBar.rawValue {
+        window.level = .statusBar
     }
 }
 
@@ -6015,7 +6433,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     private var statusPixelCatThemeMenuItem: NSMenuItem?
     private var statusLiquidGlassThemeMenuItem: NSMenuItem?
     private var statusSelectionTranslationMenuItem: NSMenuItem?
-    private var statusLicenseMenuItem: NSMenuItem?
     private var permissionWindow: NSWindow?
     private var permissionOnboardingModel: PermissionOnboardingModel?
     private var visibilityTimer: Timer?
@@ -6038,6 +6455,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     private var globalSpaceGestureMonitor: Any?
     private var spaceSwipeHorizontalAccumulator: CGFloat = 0
     private var lastPreemptiveSpaceTransitionDate = Date.distantPast
+    /// True while a trackpad Space swipe is in progress (including mid-desktop hover).
+    private var isSpaceSwipeGestureActive = false
+    private var spaceSwipeGestureEndWorkItem: DispatchWorkItem?
     private var preemptiveSpaceTransitionRestoreWorkItem: DispatchWorkItem?
     private var spaceTransitionWatchdogWorkItem: DispatchWorkItem?
     private var fullScreenHideWorkItem: DispatchWorkItem?
@@ -6077,20 +6497,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         if model.isCodexTokenAutoExpanded, model.showsKiroCredits || model.showsCodexWeeklyQuota {
             return NotchMetrics.kiroTokenExpandedSize
         }
-        return model.usesCompactExpandedOverlay
-            ? NotchMetrics.codexTokenExpandedSize
-            : NotchMetrics.expandedSize
+        if model.usesCompactExpandedOverlay {
+            return NotchMetrics.codexTokenExpandedSize
+        }
+        switch model.activeMode {
+        case .music, .system, .agent:
+            return NotchMetrics.expandedSize
+        case .token:
+            return NotchMetrics.codexTokenExpandedSize
+        }
     }
 
     private var persistentIslandWindowLevel: NSWindow.Level {
-        NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)))
+        // Above statusBar so Spaces dimming / Mission Control doesn't flatten the glass.
+        let screenSaver = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)))
+        return screenSaver.rawValue >= NSWindow.Level.statusBar.rawValue
+            ? screenSaver
+            : .statusBar
     }
 
     private var islandWindowCollectionBehavior: NSWindow.CollectionBehavior {
         [
             .canJoinAllSpaces,
-            .fullScreenNone,
-            .stationary,
+            .fullScreenAuxiliary,
             .ignoresCycle
         ]
     }
@@ -6137,18 +6566,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         }
         installVoiceWhisperHotKey()
         installApplicationContextObserver()
-        applyLayout()
-        if PermissionOnboardingModel.hasCompletedSetup {
-            model.scanLocalMusic()
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                self?.showPermissionOnboarding()
-            }
-        }
+        beginLicensedSession()
         model.applyActiveApplication(NSWorkspace.shared.frontmostApplication)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+            guard let self else { return }
             NSApp.unhideWithoutActivation()
-            self?.applyLayout()
+            self.applyLayout()
         }
         let timer = Timer(
             timeInterval: 0.2,
@@ -6163,12 +6586,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         model.$isExpanded
             .removeDuplicates()
             .sink { [weak self] isExpanded in
+                guard let self else { return }
                 if !isExpanded {
-                    self?.isExpandedByBarHover = false
-                    self?.barHoverCollapseWorkItem?.cancel()
-                    self?.barHoverCollapseWorkItem = nil
+                    self.isExpandedByBarHover = false
+                    self.barHoverCollapseWorkItem?.cancel()
+                    self.barHoverCollapseWorkItem = nil
                 }
-                self?.updateExpandedPanelVisibility(isExpanded: isExpanded, animated: true)
+                // Space settle / suppress windows: snap visibility — never animate expand/collapse.
+                let animated = !self.isSpaceTransitionPending
+                    && Date() >= self.suppressExpandedPanelUntil
+                self.updateExpandedPanelVisibility(isExpanded: isExpanded, animated: animated)
             }
             .store(in: &cancellables)
 
@@ -6176,6 +6603,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             .removeDuplicates()
             .sink { [weak self] _ in
                 self?.refreshInteractiveHitRegions()
+                self?.relayoutExpandedPanelIfNeeded()
+            }
+            .store(in: &cancellables)
+
+        model.$musicLibrarySource
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                self?.relayoutExpandedPanelIfNeeded()
             }
             .store(in: &cancellables)
 
@@ -6385,6 +6820,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         guard !isHiddenForFullScreen,
               !isSpaceTransitionPending,
               Date() >= suppressExpandedPanelUntil,
+              Date() >= model.suppressAutomaticExpansionUntilDate,
               leftWindow?.isVisible == true,
               rightWindow?.isVisible == true
         else {
@@ -6528,7 +6964,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                     deltaY: deltaY,
                     phase: phase,
                     keyCode: keyCode,
-                    modifiers: modifiers
+                    hasControlModifier: modifiers.contains(.control)
                 )
             }
         }
@@ -6544,6 +6980,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         spaceTransitionWatchdogWorkItem?.cancel()
         spaceTransitionWatchdogWorkItem = nil
         spaceSwipeHorizontalAccumulator = 0
+        isSpaceSwipeGestureActive = false
+        spaceSwipeGestureEndWorkItem?.cancel()
+        spaceSwipeGestureEndWorkItem = nil
     }
 
     private func handlePotentialSpaceTransition(
@@ -6552,11 +6991,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         deltaY: CGFloat,
         phase: NSEvent.Phase,
         keyCode: UInt16,
-        modifiers: NSEvent.ModifierFlags
+        hasControlModifier: Bool
     ) {
         if eventType == .keyDown {
             let isArrow = keyCode == UInt16(kVK_LeftArrow) || keyCode == UInt16(kVK_RightArrow)
-            if isArrow, modifiers.contains(.control) {
+            if isArrow, hasControlModifier {
                 beginPreemptiveSpaceTransition()
             }
             return
@@ -6564,6 +7003,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
         if eventType == .swipe {
             guard abs(deltaX) > abs(deltaY), abs(deltaX) > 0.1 else { return }
+            isSpaceSwipeGestureActive = true
             beginPreemptiveSpaceTransition()
             return
         }
@@ -6573,40 +7013,110 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             spaceSwipeHorizontalAccumulator = 0
         }
 
-        if abs(deltaX) > abs(deltaY) * 1.35 {
+        let isHorizontal = abs(deltaX) > abs(deltaY) * 1.2
+        if isHorizontal {
             spaceSwipeHorizontalAccumulator += deltaX
             let isEarlyHorizontalSwipe = (phase.contains(.began) || phase.contains(.mayBegin))
-                && abs(deltaX) >= 4
-            if isEarlyHorizontalSwipe || abs(spaceSwipeHorizontalAccumulator) >= 18 {
+                && abs(deltaX) >= 2
+            let isMidSwipeHold = phase.contains(.changed) && abs(spaceSwipeHorizontalAccumulator) >= 6
+            if isEarlyHorizontalSwipe || isMidSwipeHold || abs(spaceSwipeHorizontalAccumulator) >= 12 {
+                isSpaceSwipeGestureActive = true
+                // Keep cover up for the entire finger-down / mid-desktop hover period.
+                ensureSpaceTransitionGlassCoverVisible()
                 beginPreemptiveSpaceTransition()
-                spaceSwipeHorizontalAccumulator = 0
+                if abs(spaceSwipeHorizontalAccumulator) >= 12 {
+                    spaceSwipeHorizontalAccumulator = 0
+                }
             }
         }
 
         if phase.contains(.ended) || phase.contains(.cancelled) {
             spaceSwipeHorizontalAccumulator = 0
+            markSpaceSwipeGestureEnded()
         }
+    }
+
+    private func ensureSpaceTransitionGlassCoverVisible() {
+        setSpaceTransitionGlassCoverVisible(true)
+        // While finger is held between Spaces, keep re-asserting active glass under the cover.
+        for window in [cameraWindow, leftWindow, rightWindow, expandedWindow] {
+            refreshVisualEffectViews(in: window?.contentView)
+            if let window {
+                configureIslandWindowChrome(window, level: persistentIslandWindowLevel)
+            }
+        }
+    }
+
+    private func markSpaceSwipeGestureEnded() {
+        isSpaceSwipeGestureActive = false
+        spaceSwipeGestureEndWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            // If Spaces never finished switching, lift the cover shortly after finger-up.
+            if self.isSpaceTransitionPending {
+                self.finishSpaceTransition()
+            } else {
+                self.scheduleHideSpaceTransitionGlassCover()
+            }
+        }
+        spaceSwipeGestureEndWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22, execute: workItem)
     }
 
     private func beginPreemptiveSpaceTransition() {
         let now = Date()
-        guard !isSpaceTransitionPending else { return }
-        guard now.timeIntervalSince(lastPreemptiveSpaceTransitionDate) >= 0.45 else { return }
+        // Already mid-transition (finger hovering between desktops): keep cover + extend watchdog.
+        if isSpaceTransitionPending {
+            setSpaceTransitionGlassCoverVisible(true)
+            armSpaceTransitionWatchdog()
+            return
+        }
+        guard now.timeIntervalSince(lastPreemptiveSpaceTransitionDate) >= 0.2 else {
+            setSpaceTransitionGlassCoverVisible(true)
+            return
+        }
         lastPreemptiveSpaceTransitionDate = now
+
+        // Cancel pending hover expand so Space never flashes an expanded sheet.
+        barHoverEvaluationWorkItem?.cancel()
+        barHoverEvaluationWorkItem = nil
+        pendingBarHoverPoint = nil
+        barHoverCollapseWorkItem?.cancel()
+        barHoverCollapseWorkItem = nil
+        if isExpandedByBarHover, model.isExpanded {
+            isExpandedByBarHover = false
+            model.collapse()
+        }
+        isExpandedByBarHover = false
+        suppressExpandedPanelUntil = now.addingTimeInterval(0.85)
+        model.suppressAutomaticExpansion(for: 0.85)
 
         spaceTransitionOriginWasFullScreen = isHiddenForFullScreen
             || isFrontmostApplicationFullScreen()
         isSpaceTransitionPending = true
+        // Cover island surfaces before Spaces mid-swipe flicker.
+        setSpaceTransitionGlassCoverVisible(true)
         armSpaceTransitionWatchdog()
         let transitionSettleDuration = fullScreenTransitionDuration + 0.15
         spaceTransitionExpandedHideUntil = now.addingTimeInterval(transitionSettleDuration)
         if !spaceTransitionOriginWasFullScreen {
-            animatePanelsOutForSpaceTransition()
+            // Glass themes must stay at alpha 1 — fading out/in causes the gray→clear flash.
+            if model.theme.usesBackdropMaterial {
+                keepIslandWindowsFullyOpaqueForSpaceTransition()
+            } else {
+                animatePanelsOutForSpaceTransition()
+            }
         }
 
         preemptiveSpaceTransitionRestoreWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
             guard let self, self.isSpaceTransitionPending else { return }
+            // Finger still down mid-swipe — do not restore yet or glass flashes gray.
+            if self.isSpaceSwipeGestureActive {
+                self.setSpaceTransitionGlassCoverVisible(true)
+                self.armSpaceTransitionWatchdog()
+                return
+            }
             self.spaceTransitionExpandedHideUntil = .distantPast
             self.finishSpaceTransition()
         }
@@ -6618,11 +7128,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         spaceTransitionWatchdogWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
             guard let self, self.isSpaceTransitionPending else { return }
+            if self.isSpaceSwipeGestureActive {
+                self.setSpaceTransitionGlassCoverVisible(true)
+                self.armSpaceTransitionWatchdog()
+                return
+            }
             self.spaceTransitionExpandedHideUntil = .distantPast
             self.finishSpaceTransition()
         }
         spaceTransitionWatchdogWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: workItem)
     }
 
     private func installShellPromptHotKey() {
@@ -6845,7 +7360,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             isSpaceTransitionPending = false
             spaceTransitionOriginWasFullScreen = false
             spaceTransitionExpandedHideUntil = .distantPast
-            restoreIslandVisibility(fadeIn: true)
+            // Block hover / auto-expand flashes while Spaces finishes settling.
+            suppressTransientExpansionAfterSpaceChange()
+            // Instant restore — no alpha fade (avoids gray→transparent ramp after Spaces).
+            restoreIslandVisibility(fadeIn: false)
+            // Wait for the destination desktop to finish compositing, then lift the flat cover.
+            scheduleHideSpaceTransitionGlassCover()
             scheduleFullScreenVisibilityRechecks()
             return
         }
@@ -6856,9 +7376,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         if !isSpaceTransitionPending {
             spaceTransitionOriginWasFullScreen = isHiddenForFullScreen
             isSpaceTransitionPending = true
+            setSpaceTransitionGlassCoverVisible(true)
             armSpaceTransitionWatchdog()
             if !spaceTransitionOriginWasFullScreen {
-                animatePanelsOutForSpaceTransition()
+                if model.theme.usesBackdropMaterial {
+                    keepIslandWindowsFullyOpaqueForSpaceTransition()
+                } else {
+                    animatePanelsOutForSpaceTransition()
+                }
             }
         }
         spaceTransitionExpandedHideUntil = max(
@@ -6991,29 +7516,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             .filter { $0.isVisible && $0.alphaValue > 0.01 }
         guard !windows.isEmpty else { return }
 
+        // Prefer window.alphaValue over contentView.layer.opacity. Fading the
+        // content layer freezes Liquid Glass / HUD materials into solid gray/black
+        // after Mission Control / Space switches.
         for window in windows {
             window.contentView?.wantsLayer = true
-            guard let layer = window.contentView?.layer else { continue }
-            layer.removeAnimation(forKey: "spaceTransitionExit")
-            let isPet = window === desktopPetWindow || window === desktopPetBubbleWindow
-            let targetScale: CGFloat = isPet ? 0.86 : 0.92
-            let targetTranslationY: CGFloat = isPet ? 8 : 6
-            var target = CATransform3DMakeScale(targetScale, targetScale, 1)
-            target = CATransform3DTranslate(target, 0, targetTranslationY, 0)
-            let animation = CABasicAnimation(keyPath: "transform")
-            animation.fromValue = layer.presentation()?.transform ?? layer.transform
-            animation.toValue = target
-            animation.duration = fullScreenTransitionDuration
-            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            layer.transform = target
-            layer.add(animation, forKey: "spaceTransitionExit")
-            let opacityAnimation = CABasicAnimation(keyPath: "opacity")
-            opacityAnimation.fromValue = layer.presentation()?.opacity ?? layer.opacity
-            opacityAnimation.toValue = Float(0)
-            opacityAnimation.duration = fullScreenTransitionDuration
-            opacityAnimation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            layer.opacity = 0
-            layer.add(opacityAnimation, forKey: "spaceTransitionOpacity")
+            if let layer = window.contentView?.layer {
+                layer.removeAnimation(forKey: "spaceTransitionExit")
+                layer.removeAnimation(forKey: "spaceTransitionOpacity")
+                let isPet = window === desktopPetWindow || window === desktopPetBubbleWindow
+                let targetScale: CGFloat = isPet ? 0.86 : 0.92
+                let targetTranslationY: CGFloat = isPet ? 8 : 6
+                var target = CATransform3DMakeScale(targetScale, targetScale, 1)
+                target = CATransform3DTranslate(target, 0, targetTranslationY, 0)
+                let animation = CABasicAnimation(keyPath: "transform")
+                animation.fromValue = layer.presentation()?.transform ?? layer.transform
+                animation.toValue = target
+                animation.duration = fullScreenTransitionDuration
+                animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                layer.transform = target
+                layer.add(animation, forKey: "spaceTransitionExit")
+                // Keep layer.opacity at 1 so materials keep a valid backdrop binding.
+                layer.opacity = 1
+            }
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = fullScreenTransitionDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            windows.forEach { $0.animator().alphaValue = 0 }
         }
     }
 
@@ -7062,17 +7593,113 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         preemptiveSpaceTransitionRestoreWorkItem = nil
         spaceTransitionWatchdogWorkItem?.cancel()
         spaceTransitionWatchdogWorkItem = nil
+        spaceSwipeGestureEndWorkItem?.cancel()
+        spaceSwipeGestureEndWorkItem = nil
+        isSpaceSwipeGestureActive = false
         let application = NSWorkspace.shared.frontmostApplication
         model.applyActiveApplication(application)
         suppressSelectionTranslationIfFullScreen(application)
         isSpaceTransitionPending = false
         spaceTransitionOriginWasFullScreen = false
+        suppressTransientExpansionAfterSpaceChange()
 
         if isFrontmostApplicationFullScreen() {
             hideIslandPanelsForFullScreen()
+            setSpaceTransitionGlassCoverVisible(false)
         } else {
-            restoreIslandVisibility(fadeIn: true)
+            // Instant — no fadeIn alpha animation after Space settle.
+            restoreIslandVisibility(fadeIn: false)
+            scheduleHideSpaceTransitionGlassCover()
         }
+    }
+
+    /// After Spaces, ignore stale hover / playerInfo-driven expand for a short settle.
+    private func suppressTransientExpansionAfterSpaceChange() {
+        barHoverEvaluationWorkItem?.cancel()
+        barHoverEvaluationWorkItem = nil
+        pendingBarHoverPoint = nil
+        barHoverCollapseWorkItem?.cancel()
+        barHoverCollapseWorkItem = nil
+        isExpandedByBarHover = false
+        suppressExpandedPanelUntil = Date().addingTimeInterval(0.65)
+        model.suppressAutomaticExpansion(for: 0.65)
+        // If still collapsed, keep the expanded panel fully out of the window list.
+        if !model.isExpanded {
+            hideExpandedPanel(animated: false)
+        }
+    }
+
+    private var hideSpaceTransitionGlassCoverWorkItem: DispatchWorkItem?
+
+    private func keepIslandWindowsFullyOpaqueForSpaceTransition() {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            context.allowsImplicitAnimation = false
+            for window in spaceChromeWindows(includeExpanded: model.isExpanded) {
+                window.animationBehavior = .none
+                window.animator().alphaValue = 1
+                window.alphaValue = 1
+                configureIslandWindowChrome(window, level: persistentIslandWindowLevel)
+            }
+        }
+        // Never resurrect a collapsed expanded panel via alpha / chrome refresh.
+        if !model.isExpanded {
+            expandedWindow?.orderOut(nil)
+            expandedWindow?.alphaValue = 1
+        }
+    }
+
+    private func spaceChromeWindows(includeExpanded: Bool) -> [IslandPanel] {
+        var windows = [cameraWindow, leftWindow, rightWindow, desktopPetWindow, desktopPetBubbleWindow]
+            .compactMap { $0 }
+        if includeExpanded, let expandedWindow {
+            windows.append(expandedWindow)
+        }
+        return windows
+    }
+
+    private func setSpaceTransitionGlassCoverVisible(_ visible: Bool) {
+        hideSpaceTransitionGlassCoverWorkItem?.cancel()
+        hideSpaceTransitionGlassCoverWorkItem = nil
+        // Prefer theme-aware flat color so Liquid Glass / dark skins don't flash white.
+        let isDark = !model.theme.isLight || model.theme == .liquidGlass || model.theme == .bar
+        NotificationCenter.default.post(
+            name: .lumaBarSpaceTransitionGlassCover,
+            object: nil,
+            userInfo: [
+                "visible": visible,
+                "isDark": isDark
+            ]
+        )
+        // Snap windows to fully opaque whenever we manage the cover.
+        if model.theme.usesBackdropMaterial {
+            keepIslandWindowsFullyOpaqueForSpaceTransition()
+        }
+    }
+
+    private func scheduleHideSpaceTransitionGlassCover() {
+        hideSpaceTransitionGlassCoverWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            // Instant cover removal — no system alpha ramp.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            self.setSpaceTransitionGlassCoverVisible(false)
+            self.keepIslandWindowsFullyOpaqueForSpaceTransition()
+            CATransaction.commit()
+            // Re-sample wallpaper once the flat cover is gone — never front a collapsed expanded panel.
+            for window in self.spaceChromeWindows(includeExpanded: self.model.isExpanded) {
+                self.refreshVisualEffectViews(in: window.contentView)
+                window.alphaValue = 1
+                window.displayIfNeeded()
+            }
+            if !self.model.isExpanded {
+                self.hideExpandedPanel(animated: false)
+            }
+        }
+        hideSpaceTransitionGlassCoverWorkItem = workItem
+        // Short settle so the destination Space has a backdrop, then snap (no fade).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
     }
 
     private func hideIslandPanelsForFullScreen() {
@@ -7088,25 +7715,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         if visibleWindows.contains(where: { $0.alphaValue > 0.01 }) {
             for window in visibleWindows {
                 window.contentView?.wantsLayer = true
-                guard let layer = window.contentView?.layer else { continue }
-                layer.removeAnimation(forKey: "directFullScreenExit")
-                let isPet = window === desktopPetWindow || window === desktopPetBubbleWindow
-                var target = CATransform3DMakeScale(isPet ? 0.86 : 0.92, isPet ? 0.86 : 0.92, 1)
-                target = CATransform3DTranslate(target, 0, isPet ? 8 : 6, 0)
-                let animation = CABasicAnimation(keyPath: "transform")
-                animation.fromValue = layer.presentation()?.transform ?? layer.transform
-                animation.toValue = target
-                animation.duration = fullScreenTransitionDuration
-                animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                layer.transform = target
-                layer.add(animation, forKey: "directFullScreenExit")
-                let opacityAnimation = CABasicAnimation(keyPath: "opacity")
-                opacityAnimation.fromValue = layer.presentation()?.opacity ?? layer.opacity
-                opacityAnimation.toValue = Float(0)
-                opacityAnimation.duration = fullScreenTransitionDuration
-                opacityAnimation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                layer.opacity = 0
-                layer.add(opacityAnimation, forKey: "directFullScreenOpacity")
+                if let layer = window.contentView?.layer {
+                    layer.removeAnimation(forKey: "directFullScreenExit")
+                    layer.removeAnimation(forKey: "directFullScreenOpacity")
+                    let isPet = window === desktopPetWindow || window === desktopPetBubbleWindow
+                    var target = CATransform3DMakeScale(isPet ? 0.86 : 0.92, isPet ? 0.86 : 0.92, 1)
+                    target = CATransform3DTranslate(target, 0, isPet ? 8 : 6, 0)
+                    let animation = CABasicAnimation(keyPath: "transform")
+                    animation.fromValue = layer.presentation()?.transform ?? layer.transform
+                    animation.toValue = target
+                    animation.duration = fullScreenTransitionDuration
+                    animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    layer.transform = target
+                    layer.add(animation, forKey: "directFullScreenExit")
+                    // Do not fade contentView.layer.opacity — breaks translucent themes.
+                    layer.opacity = 1
+                }
+            }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = fullScreenTransitionDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                visibleWindows.forEach { $0.animator().alphaValue = 0 }
             }
         }
         let workItem = DispatchWorkItem { [weak self] in
@@ -7153,16 +7782,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         keepCompactPanelsVisible(alphaValue: fadeIn ? 0 : 1)
         updateDesktopPetVisibility()
 
-        if model.isCodexTokenAutoExpanded, !model.isExpanded {
-            model.isExpanded = true
-        }
-
+        // Honor existing expand state only — never flip isExpanded from Space / fullscreen restore.
+        // (Hover, clicks, and explicit product actions are the only expand sources.)
         if model.isExpanded {
             if wasHiddenForFullScreen || expandedWindow?.isVisible != true {
                 showExpandedPanel(animated: false)
             } else {
                 maintainExpandedPanelWithoutRebuild()
             }
+        } else {
+            hideExpandedPanel(animated: false)
         }
 
         if fadeIn {
@@ -7171,6 +7800,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                 .filter(\.isVisible)
             visibleWindows.forEach { $0.alphaValue = 0 }
             animatePanelsInFromNotch(visibleWindows)
+            // After Spaces, rebuild translucent surfaces so glass isn't stuck gray/black.
+            DispatchQueue.main.asyncAfter(deadline: .now() + fullScreenTransitionDuration + 0.05) { [weak self] in
+                self?.refreshTranslucentSurfacesAfterSpaceChange(rebuildHosting: true)
+            }
+        } else {
+            // Instant Space restore: keep hosting views, only re-assert chrome + glass.
+            refreshTranslucentSurfacesAfterSpaceChange(rebuildHosting: false)
+        }
+    }
+
+    private func refreshTranslucentSurfacesAfterSpaceChange(rebuildHosting: Bool = true) {
+        resetSpaceTransitionVisualState()
+
+        let includeExpanded = model.isExpanded
+        for window in spaceChromeWindows(includeExpanded: includeExpanded) {
+            window.animationBehavior = .none
+            window.alphaValue = 1
+            configureIslandWindowChrome(window, level: persistentIslandWindowLevel)
+            if !isHiddenForFullScreen {
+                window.orderFrontRegardless()
+            }
+        }
+        if !includeExpanded {
+            hideExpandedPanel(animated: false)
+        }
+
+        guard model.theme.usesBackdropMaterial else { return }
+
+        if rebuildHosting {
+            // Drop + recreate hosting views so layer backgrounds remount cleanly.
+            applyLayout()
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.model.theme.usesBackdropMaterial else { return }
+            for window in self.spaceChromeWindows(includeExpanded: self.model.isExpanded) {
+                self.refreshVisualEffectViews(in: window.contentView)
+                window.alphaValue = 1
+                window.viewsNeedDisplay = true
+                window.displayIfNeeded()
+            }
+            if !self.model.isExpanded {
+                self.hideExpandedPanel(animated: false)
+            }
+        }
+        // Second pass after Spaces finish compositing the destination desktop.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self, self.model.theme.usesBackdropMaterial else { return }
+            if rebuildHosting {
+                self.applyLayout()
+            }
+            for window in self.spaceChromeWindows(includeExpanded: self.model.isExpanded) {
+                self.refreshVisualEffectViews(in: window.contentView)
+                window.alphaValue = 1
+                window.displayIfNeeded()
+            }
+            if !self.model.isExpanded {
+                self.hideExpandedPanel(animated: false)
+            }
+        }
+    }
+
+    private func refreshVisualEffectViews(in root: NSView?) {
+        guard let root else { return }
+        if let locked = root as? LockedClearBackgroundView {
+            locked.lockFixedLayer()
+        } else if root is NSVisualEffectView {
+            // Should never remain — neutralize any stray system material view.
+            root.isHidden = true
+            root.alphaValue = 0
+            root.wantsLayer = true
+            root.layer?.backgroundColor = NSColor.clear.cgColor
+            root.layer?.isOpaque = false
+        }
+        for child in root.subviews {
+            refreshVisualEffectViews(in: child)
         }
     }
 
@@ -7197,8 +7902,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
         for window in [cameraWindow, leftWindow, rightWindow] {
             guard let window else { continue }
-            window.alphaValue = alphaValue
-            if !window.isVisible {
+            window.animationBehavior = .none
+            if abs(window.alphaValue - alphaValue) > 0.01 {
+                window.alphaValue = alphaValue
+            }
+            // Cheap level/opaque lock only when something drifted — never full tree strip.
+            if window.level != persistentIslandWindowLevel
+                || window.isOpaque
+                || window.hasShadow
+                || window.backgroundColor != .clear
+            {
+                configureIslandWindowChrome(window, level: persistentIslandWindowLevel)
+            }
+            if !window.isVisible, alphaValue > 0.01 {
                 window.orderFrontRegardless()
             }
         }
@@ -7290,17 +8006,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         )
 
         panel.backgroundColor = .clear
-        panel.collectionBehavior = islandWindowCollectionBehavior
+        panel.isOpaque = false
         panel.hasShadow = false
         panel.hidesOnDeactivate = false
         panel.isExcludedFromWindowsMenu = true
         panel.isMovableByWindowBackground = false
-        panel.isOpaque = false
         panel.isReleasedWhenClosed = false
         panel.acceptsMouseMovedEvents = true
-        panel.level = level ?? NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)))
+        panel.animationBehavior = .none
+        panel.alphaValue = 1
         panel.title = title
+        let resolvedLevel = level ?? .statusBar
+        configureIslandWindowChrome(panel, level: resolvedLevel)
+        // Prefer the higher of statusBar and any caller-provided persistent level.
+        if let level, level.rawValue > panel.level.rawValue {
+            panel.level = level
+        }
         panel.contentView = FirstMouseHostingView(rootView: rootView)
+        // Force an immediate layout/display pass so glass is ready before first Spaces swipe.
+        panel.contentView?.layoutSubtreeIfNeeded()
+        panel.contentView?.displayIfNeeded()
+        panel.alphaValue = 1
 
         return panel
     }
@@ -7317,7 +8043,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         }
         .frame(width: expandedPanelSize.width, height: expandedPanelSize.height)
         .environment(\.islandTheme, model.theme)
-        .preferredColorScheme(model.theme.preferredColorScheme)
+        // Liquid Glass: don't force dark scheme — it milks the behind-window blur gray/white.
+        .preferredColorScheme(model.theme == .liquidGlass ? nil : model.theme.preferredColorScheme)
 
         let hostingView = FirstMouseHostingView(
             rootView: rootView
@@ -7328,6 +8055,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             ? model.theme.tokenOverlayCornerRadius
             : model.theme.expandedCornerRadius
         hostingView.layer?.cornerCurve = model.theme.isEightBit ? .circular : .continuous
+        // Layer-backed fixed fills; clipping is safe (no backdrop material sampling).
         hostingView.layer?.masksToBounds = true
         hostingView.layer?.isOpaque = false
         return hostingView
@@ -7431,12 +8159,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             y: startOrigin.y + mouseLocation.y - startMouseLocation.y
         )
         window.setFrameOrigin(constrainedDesktopPetOrigin(proposedOrigin))
+        configureIslandWindowChrome(window, level: persistentIslandWindowLevel)
+        refreshVisualEffectViews(in: window.contentView)
     }
 
     private func finishDesktopPetDrag() {
         guard desktopPetDragStartOrigin != nil, let origin = desktopPetWindow?.frame.origin else { return }
         desktopPetDragStartOrigin = nil
         desktopPetDragStartMouseLocation = nil
+        if let window = desktopPetWindow {
+            configureIslandWindowChrome(window, level: persistentIslandWindowLevel)
+            refreshVisualEffectViews(in: window.contentView)
+        }
         UserDefaults.standard.set(Double(origin.x), forKey: desktopPetOriginXDefaultsKey)
         UserDefaults.standard.set(Double(origin.y), forKey: desktopPetOriginYDefaultsKey)
     }
@@ -7620,7 +8354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             self?.hideFullScreenCompletionToast()
         }
         fullScreenCompletionToastDismissWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4, execute: workItem)
     }
 
     private func hideFullScreenCompletionToast() {
@@ -7701,6 +8435,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         updateDesktopPetVisibility()
     }
 
+    private func beginLicensedSession() {
+        applyLayout()
+        if PermissionOnboardingModel.hasCompletedSetup {
+            model.scanLocalMusic()
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.showPermissionOnboarding()
+            }
+        }
+    }
+
     private func collapseExpandedPanel() {
         dismissExpandedPanelImmediately()
     }
@@ -7719,6 +8464,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         } else {
             hideExpandedPanel(animated: animated)
         }
+    }
+
+    private func relayoutExpandedPanelIfNeeded() {
+        guard model.isExpanded, let expandedWindow, expandedWindow.isVisible else { return }
+        expandedWindow.setFrame(expandedFrame(), display: true)
+        expandedWindow.contentView = makeExpandedHostingView()
+        refreshInteractiveHitRegions()
     }
 
     private func showExpandedPanel(animated: Bool) {
@@ -7831,6 +8583,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                 model.showAgent()
                 pinExpandedPanelFromUserClick(expandIfNeeded: true)
             }
+        case .showMusic:
+            expandedWindow?.makeFirstResponder(nil)
+            model.showMusic()
+            refreshInteractiveHitRegions()
+            relayoutExpandedPanelIfNeeded()
+        case .showSystem:
+            expandedWindow?.makeFirstResponder(nil)
+            model.showSystem()
+            refreshInteractiveHitRegions()
+            relayoutExpandedPanelIfNeeded()
+        case .showAgentMode:
+            model.showAgent()
+            refreshInteractiveHitRegions()
+            relayoutExpandedPanelIfNeeded()
+            if let expandedWindow {
+                activateForUserInteraction(panel: expandedWindow)
+            }
         case .openExternalToken:
             // Same as a normal bar click: open Music / System / Agent, not the token sheet.
             pinExpandedPanelFromUserClick(expandIfNeeded: true)
@@ -7902,30 +8671,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     private func expandedImmediateActions() -> [(rect: NSRect, action: IslandPanelAction)] {
-        guard model.activeMode == .agent else { return [] }
+        var actions: [(rect: NSRect, action: IslandPanelAction)] = []
+
+        // Mode pills sit left of the collapse control. Route them as immediate
+        // actions so Agent's focused TextField can't swallow the first click.
+        let size = expandedPanelSize
+        let pad = NotchMetrics.expandedHeaderPadding
+        let rowH = NotchMetrics.expandedHeaderRowHeight
+        let pillW = NotchMetrics.expandedModePillWidth
+        let pillGap = NotchMetrics.expandedModePillSpacing
+        let collapseW = NotchMetrics.expandedCollapseButton
+        let y = size.height - pad - rowH
+        var cursorX = size.width - pad - collapseW - 6
+
+        let modeItems: [(CGFloat, IslandPanelAction)] = [
+            (pillW, .showAgentMode),
+            (pillW, .showSystem),
+            (pillW, .showMusic)
+        ]
+        for (width, action) in modeItems {
+            cursorX -= width
+            actions.append((
+                rect: NSRect(x: cursorX - 2, y: y - 2, width: width + 4, height: rowH + 4),
+                action: action
+            ))
+            cursorX -= pillGap
+        }
+
+        guard model.activeMode == .agent else { return actions }
 
         let font = model.theme.isPixelStyled
             ? NSFont.monospacedSystemFont(ofSize: 9.5, weight: .semibold)
             : NSFont.systemFont(ofSize: 9.5, weight: .semibold)
-        var x: CGFloat = 14
-        return model.agentQuickActions.map { quickAction in
+        var x: CGFloat = pad
+        // Quick actions sit below the compact header + context row.
+        let quickY = size.height - pad - rowH - 8 - 52
+        for quickAction in model.agentQuickActions {
             let textWidth = (quickAction.title as NSString).size(withAttributes: [.font: font]).width
             let width = ceil(textWidth) + 35
             defer { x += width + 7 }
-            return (
-                rect: NSRect(x: x, y: 72, width: width, height: 31),
+            actions.append((
+                rect: NSRect(x: x, y: max(8, quickY), width: width, height: 28),
                 action: .agentQuickAction(quickAction.kind)
-            )
+            ))
         }
+        return actions
     }
 
     private func expandedCollapseHitRect() -> NSRect {
         let size = expandedPanelSize
+        let pad = NotchMetrics.expandedHeaderPadding
+        let button = NotchMetrics.expandedCollapseButton
+        // Tight hit target — the old 82×82 zone covered Music/System/Agent pills.
         return NSRect(
-            x: size.width - 82,
-            y: size.height - 82,
-            width: 82,
-            height: 82
+            x: size.width - pad - button - 2,
+            y: size.height - pad - button - 2,
+            width: button + 4,
+            height: button + 4
         )
     }
 
@@ -8065,6 +8867,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         let mainMenu = NSMenu()
         let appMenuItem = NSMenuItem(title: "luma bar", action: nil, keyEquivalent: "")
         let appMenu = NSMenu(title: "luma bar")
+        let aboutItem = NSMenuItem(
+            title: "About luma bar",
+            action: #selector(showAboutFromMenu),
+            keyEquivalent: ""
+        )
+        aboutItem.target = self
+        appMenu.addItem(aboutItem)
+        appMenu.addItem(.separator())
         appMenu.addItem(
             NSMenuItem(
                 title: "Quit luma bar",
@@ -8165,7 +8975,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         let agentMenu = NSMenu(title: "Agent")
         if AppStoreDistribution.allowsShellAutomation {
             let shellPromptItem = NSMenuItem(
-                title: "Shell Prompt",
+                title: AppStoreDistribution.isAppStoreBuild ? "Safe Action Prompt" : "Shell Prompt",
                 action: #selector(openShellPromptFromMenu),
                 keyEquivalent: "\r"
             )
@@ -8173,6 +8983,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             shellPromptItem.keyEquivalentModifierMask = [.command, .shift]
             agentMenu.addItem(shellPromptItem)
         }
+        #if LUMA_APP_STORE
+        let dataAccessMenu = NSMenu(title: "Data Access")
+        let grantCursor = NSMenuItem(
+            title: "Grant Cursor Folder…",
+            action: #selector(grantCursorFolderAccess),
+            keyEquivalent: ""
+        )
+        grantCursor.target = self
+        dataAccessMenu.addItem(grantCursor)
+        let grantCodex = NSMenuItem(
+            title: "Grant Codex Folder…",
+            action: #selector(grantCodexFolderAccess),
+            keyEquivalent: ""
+        )
+        grantCodex.target = self
+        dataAccessMenu.addItem(grantCodex)
+        let dataAccessItem = NSMenuItem(title: "Data Access", action: nil, keyEquivalent: "")
+        dataAccessItem.submenu = dataAccessMenu
+        agentMenu.addItem(dataAccessItem)
+        #endif
         let voiceWhisperItem = NSMenuItem(
             title: "Voice Whisper",
             action: #selector(openVoiceWhisperFromMenu),
@@ -8298,7 +9128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
         if AppStoreDistribution.allowsShellAutomation {
             let shellPromptItem = NSMenuItem(
-                title: "Shell Prompt (⌘⇧↩)",
+                title: AppStoreDistribution.isAppStoreBuild ? "Safe Action Prompt (⌘⇧↩)" : "Shell Prompt (⌘⇧↩)",
                 action: #selector(openShellPromptFromMenu),
                 keyEquivalent: ""
             )
@@ -8342,16 +9172,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             statusSelectionTranslationMenuItem = selectionItem
         }
 
-        if AppStoreDistribution.showsLicenseUI {
-            let licenseItem = NSMenuItem(
-                title: model.licenseStatus.menuTitle,
-                action: #selector(showLicenseFromMenu),
-                keyEquivalent: ""
-            )
-            licenseItem.target = self
-            menu.addItem(licenseItem)
-            statusLicenseMenuItem = licenseItem
-        }
 
         if AppStoreDistribution.allowsAccessibilityFeatures {
             let accessibilityItem = NSMenuItem(
@@ -8385,6 +9205,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
     @objc private func quitFromMenu() {
         AppController.quitFromUserAction()
+    }
+
+    @objc private func showAboutFromMenu() {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+        let copyright = Bundle.main.object(forInfoDictionaryKey: "NSHumanReadableCopyright") as? String
+            ?? "Copyright © 2026 Luma Bar Core Team"
+        let alert = NSAlert()
+        alert.messageText = "luma bar"
+        alert.informativeText = "Version \(version) (\(build))\n\n\(copyright)"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     @objc private func openShellPromptFromMenu() {
@@ -8432,70 +9266,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     @objc private func toggleSelectionTranslation() {
-        if !model.isProActive {
-            model.presentProUpgradePrompt(feature: "划词翻译")
-            model.showAgent()
-            model.isExpanded = true
-            return
-        }
         model.isSelectionTranslationEnabled.toggle()
     }
 
-    @objc private func showLicenseFromMenu() {
-        presentLicensePanel()
-    }
-
-    private func presentLicensePanel() {
-        model.refreshLicenseStatus()
-        let status = model.licenseStatus
-        let alert = NSAlert()
-        alert.messageText = "Luma Bar 许可证"
-        alert.informativeText = status.summary
-            + "\n\nPro：¥28 / ¥45 / ¥68（1/3/5 台，含 12 个月更新）\n续费：¥18 / ¥28 / ¥45"
-        alert.alertStyle = .informational
-
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
-        field.placeholderString = "粘贴许可证密钥 LB1...."
-        if let key = status.record?.key {
-            field.stringValue = key
-        }
-        alert.accessoryView = field
-
-        alert.addButton(withTitle: "激活")
-        alert.addButton(withTitle: "购买 Pro")
-        let hasLicense = status.record != nil
-        if hasLicense {
-            alert.addButton(withTitle: "停用此 Mac")
-        }
-        alert.addButton(withTitle: "关闭")
-
-        NSApp.activate(ignoringOtherApps: true)
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            do {
-                _ = try model.activateLicense(key: field.stringValue)
-                let done = NSAlert()
-                done.messageText = "激活成功"
-                done.informativeText = model.licenseStatus.summary
-                done.runModal()
-                rebuildStatusMenuTitles()
-            } catch {
-                let fail = NSAlert()
-                fail.messageText = "激活失败"
-                fail.informativeText = error.localizedDescription
-                fail.runModal()
-            }
-        } else if response == .alertSecondButtonReturn {
-            NSWorkspace.shared.open(LumaLicenseSecrets.purchaseURL)
-        } else if hasLicense, response == .alertThirdButtonReturn {
-            model.deactivateLicense()
-            rebuildStatusMenuTitles()
-        }
-    }
-
     private func rebuildStatusMenuTitles() {
-        model.refreshLicenseStatus()
-        statusLicenseMenuItem?.title = model.licenseStatus.menuTitle
         selectionTranslationMenuItem?.state = model.isSelectionTranslationEnabled ? .on : .off
         statusSelectionTranslationMenuItem?.state = model.isSelectionTranslationEnabled ? .on : .off
     }
@@ -8503,6 +9277,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     @objc private func requestAccessibilityAccessFromMenu() {
         AgentContextProvider.requestAccessibilityAccess()
     }
+
+    #if LUMA_APP_STORE
+    @objc private func grantCursorFolderAccess() {
+        if SecurityScopedBookmarks.promptAndStore(for: .cursorApplicationSupport) != nil {
+            model.requestDesktopPetMessage?("已授权 Cursor 数据目录。")
+        }
+    }
+
+    @objc private func grantCodexFolderAccess() {
+        if SecurityScopedBookmarks.promptAndStore(for: .codexHome) != nil {
+            model.requestDesktopPetMessage?("已授权 Codex 数据目录。")
+        }
+    }
+    #endif
 
     @objc private func showPermissionSetupFromMenu() {
         showPermissionOnboarding()
@@ -8554,8 +9342,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
     private func handlePermissionBecameAuthorized(_ permission: LumaBarPermission) {
         switch permission {
-        case .music:
-            model.scanLocalMusic()
         case .accessibility:
             if AppStoreDistribution.allowsSelectionTranslation {
                 removeSelectionTranslationMonitor()
@@ -8569,14 +9355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
     /// Reload features that depend on TCC after the user grants them in System Settings.
     private func applyGrantedCapabilities(forceMusicScan: Bool, announce: Bool) {
-        let musicAuthorized = {
-            switch MusicAuthorization.currentStatus {
-            case .authorized: return true
-            default: return false
-            }
-        }()
-
-        if forceMusicScan || musicAuthorized {
+        if forceMusicScan {
             model.scanLocalMusic()
         }
 
@@ -8591,9 +9370,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         refreshInteractiveHitRegions()
 
         if announce {
-            if musicAuthorized {
-                model.requestDesktopPetMessage?("权限已更新，内容正在刷新。")
-            }
+            model.requestDesktopPetMessage?("权限已更新，内容正在刷新。")
         }
     }
 
@@ -8637,13 +9414,30 @@ enum TrackPlaybackSource: Hashable {
     case direct
     case netEase
     case netEaseSong(id: String)
+    case appleMusic
 
     var isNetEaseBacked: Bool {
         switch self {
         case .netEase, .netEaseSong:
             return true
-        case .direct:
+        case .direct, .appleMusic:
             return false
+        }
+    }
+}
+
+enum IslandMusicLibrarySource: String, CaseIterable, Identifiable {
+    case local
+    case appleMusic
+    case netEase
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .local: return "本地"
+        case .appleMusic: return "Apple Music"
+        case .netEase: return "网易云"
         }
     }
 }
@@ -8658,6 +9452,18 @@ struct NetEaseNowPlaying: Equatable {
     let isPlaying: Bool
 
     func with(position: TimeInterval) -> NetEaseNowPlaying {
+        NetEaseNowPlaying(
+            title: title,
+            artist: artist,
+            album: album,
+            artworkData: artworkData,
+            position: position,
+            duration: duration,
+            isPlaying: isPlaying
+        )
+    }
+
+    func with(isPlaying: Bool) -> NetEaseNowPlaying {
         NetEaseNowPlaying(
             title: title,
             artist: artist,
@@ -8721,7 +9527,7 @@ struct NetEasePlaylist: Identifiable, Hashable {
     }
 }
 
-private enum NetEaseRemoteCommand: Int32 {
+enum NetEaseRemoteCommand: Int32 {
     case play = 0
     case pause = 1
     case togglePlayPause = 2
@@ -8732,15 +9538,35 @@ private enum NetEaseRemoteCommand: Int32 {
 
 
 #if LUMA_APP_STORE
-private final class NetEaseBridge: @unchecked Sendable {
+final class NetEaseBridge: @unchecked Sendable {
     static let shared = NetEaseBridge()
 
     func fetchNowPlaying(completion: @escaping (NetEaseNowPlaying?) -> Void) {
         completion(nil)
     }
 
+    func fetchNowPlaying(
+        allowedBundleIDs: Set<String>,
+        defaultArtist: String,
+        completion: @escaping (NetEaseNowPlaying?) -> Void
+    ) {
+        completion(nil)
+    }
+
     @discardableResult
     func send(_ command: NetEaseRemoteCommand) -> Bool {
+        false
+    }
+
+    /// Pause only NetEase Cloud Music — never broadcast a global media key.
+    @discardableResult
+    func pauseNetEaseOnly() -> Bool {
+        false
+    }
+
+    /// Play only NetEase Cloud Music — never broadcast a global media key.
+    @discardableResult
+    func playNetEaseOnly() -> Bool {
         false
     }
 
@@ -8785,7 +9611,7 @@ private final class NetEaseNowPlayingCompletionBox: @unchecked Sendable {
     }
 }
 
-private final class NetEaseBridge: @unchecked Sendable {
+final class NetEaseBridge: @unchecked Sendable {
     private static let bundleIdentifier = netEaseMusicBundleIdentifier
 
     static let shared = NetEaseBridge()
@@ -8802,6 +9628,8 @@ private final class NetEaseBridge: @unchecked Sendable {
         let path = "/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote"
         let handle = dlopen(path, RTLD_NOW)
         frameworkHandle = handle
+        // Ensure Objective-C classes like MRNowPlayingRequest are registered.
+        _ = Bundle(path: "/System/Library/PrivateFrameworks/MediaRemote.framework")?.load()
 
         if let handle, let symbol = dlsym(handle, "MRMediaRemoteGetNowPlayingInfo") {
             getNowPlayingInfo = unsafeBitCast(symbol, to: MediaRemoteGetInfoFunction.self)
@@ -8823,13 +9651,30 @@ private final class NetEaseBridge: @unchecked Sendable {
     }
 
     func fetchNowPlaying(completion: @escaping (NetEaseNowPlaying?) -> Void) {
-        if Self.requiresProcessFallback {
-            fetchNowPlayingUsingJXA(completion: completion)
+        fetchNowPlaying(
+            allowedBundleIDs: [Self.bundleIdentifier],
+            defaultArtist: "NetEase Cloud Music",
+            completion: completion
+        )
+    }
+
+    func fetchNowPlaying(
+        allowedBundleIDs: Set<String>,
+        defaultArtist: String,
+        completion: @escaping (NetEaseNowPlaying?) -> Void
+    ) {
+        // Prefer in-process MediaRemote (includes artwork). JXA is metadata-only fallback.
+        if let info = Self.modernNowPlayingInfo(allowedBundleIDs: allowedBundleIDs) {
+            completion(Self.makeNowPlaying(from: info, defaultArtist: defaultArtist))
             return
         }
 
-        if let info = Self.modernNowPlayingInfo() {
-            completion(Self.makeNowPlaying(from: info))
+        if Self.requiresProcessFallback {
+            fetchNowPlayingUsingJXA(
+                allowedBundleIDs: allowedBundleIDs,
+                defaultArtist: defaultArtist,
+                completion: completion
+            )
             return
         }
 
@@ -8841,7 +9686,8 @@ private final class NetEaseBridge: @unchecked Sendable {
         let pidCallback: MediaRemotePIDBlock = { pid in
             guard
                 pid > 0,
-                NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier == Self.bundleIdentifier
+                let bundleID = NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier,
+                allowedBundleIDs.contains(bundleID)
             else {
                 completion(nil)
                 return
@@ -8852,7 +9698,7 @@ private final class NetEaseBridge: @unchecked Sendable {
                     completion(nil)
                     return
                 }
-                completion(Self.makeNowPlaying(from: dictionary))
+                completion(Self.makeNowPlaying(from: dictionary, defaultArtist: defaultArtist))
             }
             getNowPlayingInfo(.main, unsafeBitCast(infoCallback, to: AnyObject.self))
         }
@@ -8865,7 +9711,11 @@ private final class NetEaseBridge: @unchecked Sendable {
             || (version.majorVersion == 15 && version.minorVersion >= 4)
     }
 
-    private func fetchNowPlayingUsingJXA(completion: @escaping (NetEaseNowPlaying?) -> Void) {
+    private func fetchNowPlayingUsingJXA(
+        allowedBundleIDs: Set<String>,
+        defaultArtist: String,
+        completion: @escaping (NetEaseNowPlaying?) -> Void
+    ) {
         fallbackLock.lock()
         guard !isFallbackFetchInFlight else {
             fallbackLock.unlock()
@@ -8876,7 +9726,10 @@ private final class NetEaseBridge: @unchecked Sendable {
         let completionBox = NetEaseNowPlayingCompletionBox(completion)
 
         fallbackQueue.async { [weak self] in
-            let nowPlaying = Self.jxaNowPlayingInfo()
+            let nowPlaying = Self.jxaNowPlayingInfo(
+                allowedBundleIDs: allowedBundleIDs,
+                defaultArtist: defaultArtist
+            )
 
             guard let self else { return }
             self.fallbackLock.lock()
@@ -8886,7 +9739,10 @@ private final class NetEaseBridge: @unchecked Sendable {
         }
     }
 
-    private static func jxaNowPlayingInfo() -> NetEaseNowPlaying? {
+    private static func jxaNowPlayingInfo(
+        allowedBundleIDs: Set<String>,
+        defaultArtist: String
+    ) -> NetEaseNowPlaying? {
         let source = #"""
         ObjC.import("Foundation");
         const bundle = $.NSBundle.bundleWithPath("/System/Library/PrivateFrameworks/MediaRemote.framework");
@@ -8925,13 +9781,22 @@ private final class NetEaseBridge: @unchecked Sendable {
             process.waitUntilExit()
             guard process.terminationStatus == 0,
                   let payload = try? JSONDecoder().decode(NetEaseJXANowPlayingPayload.self, from: data),
-                  payload.bundleId == bundleIdentifier
-                    || payload.displayName?.lowercased().contains("netease") == true,
                   let title = payload.title,
                   !title.isEmpty
             else {
                 return nil
             }
+
+            let bundleMatched = payload.bundleId.map { allowedBundleIDs.contains($0) } ?? false
+            let display = payload.displayName?.lowercased() ?? ""
+            let looksLikeNetEase =
+                display.contains("netease")
+                || display.contains("163")
+                || display.contains("网易")
+            let displayMatched =
+                allowedBundleIDs.contains(netEaseMusicBundleIdentifier)
+                && (looksLikeNetEase || display.contains("cloud music"))
+            guard bundleMatched || displayMatched else { return nil }
 
             let duration = max(0, payload.duration ?? 0)
             let playbackRate = payload.playbackRate ?? 0
@@ -8946,7 +9811,7 @@ private final class NetEaseBridge: @unchecked Sendable {
 
             return NetEaseNowPlaying(
                 title: title,
-                artist: payload.artist ?? "NetEase Cloud Music",
+                artist: payload.artist ?? defaultArtist,
                 album: payload.album ?? "",
                 artworkData: nil,
                 position: position,
@@ -8958,7 +9823,7 @@ private final class NetEaseBridge: @unchecked Sendable {
         }
     }
 
-    private static func modernNowPlayingInfo() -> [String: Any]? {
+    private static func modernNowPlayingInfo(allowedBundleIDs: Set<String>) -> [String: Any]? {
         guard let requestClass = NSClassFromString("MRNowPlayingRequest") as? NSObject.Type else {
             return nil
         }
@@ -8974,10 +9839,17 @@ private final class NetEaseBridge: @unchecked Sendable {
         let bundleID = objectValue(client, selector: "bundleIdentifier") as? String
         let parentBundleID = objectValue(client, selector: "parentApplicationBundleIdentifier") as? String
         let displayName = (objectValue(client, selector: "displayName") as? String)?.lowercased() ?? ""
-        guard bundleID == bundleIdentifier
-                || parentBundleID == bundleIdentifier
-                || displayName.contains("netease")
-        else {
+        let looksLikeNetEase =
+            displayName.contains("netease")
+            || displayName.contains("163")
+            || displayName.contains("网易")
+        let bundleMatched =
+            (bundleID.map { allowedBundleIDs.contains($0) } ?? false)
+            || (parentBundleID.map { allowedBundleIDs.contains($0) } ?? false)
+        let displayMatched =
+            allowedBundleIDs.contains(netEaseMusicBundleIdentifier)
+            && (looksLikeNetEase || displayName.contains("cloud music"))
+        guard bundleMatched || displayMatched else {
             return nil
         }
 
@@ -9000,10 +9872,38 @@ private final class NetEaseBridge: @unchecked Sendable {
 
     @discardableResult
     func send(_ command: NetEaseRemoteCommand) -> Bool {
-        if sendModern(command: command, options: nil) {
+        // Never fall back to bare MRMediaRemoteSendCommand — that hits whichever
+        // app currently owns system Now Playing (often Music.app), causing dual audio.
+        switch command {
+        case .pause:
+            return pauseNetEaseOnly()
+        case .play:
+            return playNetEaseOnly()
+        case .togglePlayPause:
+            // AppleScript / Orpheus only — never MediaRemote toggle (broadcast risk).
+            return runNetEaseAppleScript("playpause")
+                || openOrpheusCommand(["cmd": "playpause"])
+        case .nextTrack, .previousTrack, .seekToPlaybackPosition:
+            return sendTargetedTransport(command)
+        }
+    }
+
+    /// Pause only NetEase Cloud Music — never a global / Music.app media command.
+    @discardableResult
+    func pauseNetEaseOnly() -> Bool {
+        if sendModernIfNetEase(command: .pause, options: nil) {
             return true
         }
-        return sendRemoteCommand?(command.rawValue, nil) ?? false
+        return runNetEaseAppleScript("pause") || openOrpheusCommand(["cmd": "pause"])
+    }
+
+    /// Play only NetEase Cloud Music — never a global media key broadcast.
+    @discardableResult
+    func playNetEaseOnly() -> Bool {
+        if sendModernIfNetEase(command: .play, options: nil) {
+            return true
+        }
+        return runNetEaseAppleScript("play") || openOrpheusCommand(["cmd": "play"])
     }
 
     @discardableResult
@@ -9011,28 +9911,61 @@ private final class NetEaseBridge: @unchecked Sendable {
         let dictionary = [
             "kMRMediaRemoteOptionPlaybackPosition": NSNumber(value: max(0, position))
         ] as NSDictionary
-        if sendModern(command: .seekToPlaybackPosition, options: dictionary) {
+        if sendModernIfNetEase(command: .seekToPlaybackPosition, options: dictionary) {
             return true
         }
-
-        let legacyOptions = [
-            "kMRMediaRemoteOptionPlaybackPosition": NSNumber(value: max(0, position))
-        ] as CFDictionary
-        return sendRemoteCommand?(
-            NetEaseRemoteCommand.seekToPlaybackPosition.rawValue,
-            legacyOptions
-        ) ?? false
+        // Avoid legacy global seek — it would scrub Music.app when it owns Now Playing.
+        let seconds = String(format: "%.2f", max(0, position))
+        return runNetEaseAppleScript("set player position to \(seconds)")
     }
 
-    private func sendModern(command: NetEaseRemoteCommand, options: NSDictionary?) -> Bool {
+    private func sendTargetedTransport(_ command: NetEaseRemoteCommand) -> Bool {
+        if sendModernIfNetEase(command: command, options: nil) {
+            return true
+        }
+        switch command {
+        case .nextTrack:
+            return runNetEaseAppleScript("next track") || openOrpheusCommand(["cmd": "next"])
+        case .previousTrack:
+            return runNetEaseAppleScript("previous track") || openOrpheusCommand(["cmd": "prev"])
+        case .togglePlayPause:
+            return runNetEaseAppleScript("playpause")
+                || openOrpheusCommand(["cmd": "playpause"])
+        case .play:
+            return playNetEaseOnly()
+        case .pause:
+            return pauseNetEaseOnly()
+        case .seekToPlaybackPosition:
+            return false
+        }
+    }
+
+    /// MediaRemote only when the system Now Playing client is NetEase.
+    private func sendModernIfNetEase(command: NetEaseRemoteCommand, options: NSDictionary?) -> Bool {
         guard let requestClass = NSClassFromString("MRNowPlayingRequest") as? NSObject.Type else {
             return false
         }
 
         let playerPathSelector = NSSelectorFromString("localNowPlayingPlayerPath")
         guard requestClass.responds(to: playerPathSelector),
-              let playerPath = requestClass.perform(playerPathSelector)?.takeUnretainedValue(),
-              let allocated = requestClass.perform(NSSelectorFromString("alloc"))?.takeRetainedValue() as? NSObject,
+              let playerPath = requestClass.perform(playerPathSelector)?.takeUnretainedValue() as? NSObject,
+              let client = Self.objectValue(playerPath, selector: "client") as? NSObject
+        else {
+            return false
+        }
+
+        let bundleID = Self.objectValue(client, selector: "bundleIdentifier") as? String
+        let parentBundleID = Self.objectValue(client, selector: "parentApplicationBundleIdentifier") as? String
+        let displayName = (Self.objectValue(client, selector: "displayName") as? String)?.lowercased() ?? ""
+        let isNetEase =
+            bundleID == Self.bundleIdentifier
+            || parentBundleID == Self.bundleIdentifier
+            || displayName.contains("netease")
+            || displayName.contains("163")
+            || displayName.contains("网易")
+        guard isNetEase else { return false }
+
+        guard let allocated = requestClass.perform(NSSelectorFromString("alloc"))?.takeRetainedValue() as? NSObject,
               let request = allocated.perform(
                   NSSelectorFromString("initWithPlayerPath:"),
                   with: playerPath
@@ -9062,6 +9995,35 @@ private final class NetEaseBridge: @unchecked Sendable {
             )
         }
         return true
+    }
+
+    @discardableResult
+    private func runNetEaseAppleScript(_ command: String) -> Bool {
+        let script = """
+        tell application id "\(Self.bundleIdentifier)"
+          try
+            \(command)
+            return "ok"
+          end try
+        end tell
+        """
+        var error: NSDictionary?
+        guard let appleScript = NSAppleScript(source: script) else { return false }
+        let result = appleScript.executeAndReturnError(&error)
+        return error == nil && result.stringValue != nil
+    }
+
+    @discardableResult
+    private func openOrpheusCommand(_ message: [String: String]) -> Bool {
+        guard let url = Self.commandURL(message: message) else { return false }
+        DispatchQueue.main.async {
+            NSWorkspace.shared.open(url)
+        }
+        return true
+    }
+
+    private func sendModern(command: NetEaseRemoteCommand, options: NSDictionary?) -> Bool {
+        sendModernIfNetEase(command: command, options: options)
     }
 
     @MainActor
@@ -9103,7 +10065,8 @@ private final class NetEaseBridge: @unchecked Sendable {
 
     @MainActor
     func openSong(id: String) {
-        openApplication(activates: true)
+        // Prefer orpheus play commands; avoid opening song web pages (focus steal / panel collapse).
+        openApplication(activates: false)
 
         let playMessages: [[String: String]] = [
             ["cmd": "play", "type": "song", "id": id],
@@ -9116,16 +10079,7 @@ private final class NetEaseBridge: @unchecked Sendable {
             }
         }
 
-        let songPageCandidates = [
-            "https://music.163.com/song?id=\(id)",
-            "https://music.163.com/#/song?id=\(id)"
-        ]
-        for page in songPageCandidates {
-            guard let webURL = URL(string: page) else { continue }
-            openNetEaseWebURL(webURL)
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
             _ = self?.send(.play)
         }
     }
@@ -9156,7 +10110,7 @@ private final class NetEaseBridge: @unchecked Sendable {
         }
     }
 
-    private static func makeNowPlaying(from info: [String: Any]) -> NetEaseNowPlaying? {
+    private static func makeNowPlaying(from info: [String: Any], defaultArtist: String = "NetEase Cloud Music") -> NetEaseNowPlaying? {
         let title = info["kMRMediaRemoteNowPlayingInfoTitle"] as? String ?? ""
         guard !title.isEmpty else { return nil }
 
@@ -9169,7 +10123,7 @@ private final class NetEaseBridge: @unchecked Sendable {
 
         return NetEaseNowPlaying(
             title: title,
-            artist: info["kMRMediaRemoteNowPlayingInfoArtist"] as? String ?? "NetEase Cloud Music",
+            artist: info["kMRMediaRemoteNowPlayingInfoArtist"] as? String ?? defaultArtist,
             album: info["kMRMediaRemoteNowPlayingInfoAlbum"] as? String ?? "",
             artworkData: info["kMRMediaRemoteNowPlayingInfoArtworkData"] as? Data,
             position: position,
@@ -9193,7 +10147,10 @@ struct LocalTrack: Identifiable, Hashable {
     let playbackSource: TrackPlaybackSource
 
     var displayArtist: String {
-        artist.isEmpty ? "Local file" : artist
+        if artist.isEmpty {
+            return "Local file"
+        }
+        return artist
     }
 
     var displaySubtitle: String {
@@ -9362,7 +10319,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             #endif
         }
     }
-    @Published private(set) var licenseStatus: LumaLicenseStatus = LumaLicenseManager.currentStatus()
     @Published var tracks: [LocalTrack] = []
     @Published var currentIndex = 0
     @Published var isPlaying = false
@@ -9380,6 +10336,14 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     @Published var selectedNetEasePlaylistTracks: [LocalTrack] = []
     @Published var selectedNetEasePlaylistID: String?
     @Published var isUsingNetEase = false
+    @Published var appleMusicNowPlaying: MusicNowPlayingInfo?
+    @Published private var resolvedAppleMusicTrack: LocalTrack?
+    @Published var isUsingAppleMusic = false
+    /// The single source that owns island play/pause routing and exclusive audio.
+    @Published private(set) var activeMusicSource: IslandMusicLibrarySource = .local
+    /// Cancels stale ensureSinglePlayerPlaying play callbacks when the user clicks rapidly.
+    private var exclusivePlayGeneration: UInt64 = 0
+    @Published var musicLibrarySource: IslandMusicLibrarySource = .local
     @Published var isScanning = false
     @Published var scanMessage = "Scanning local music"
     @Published var position: TimeInterval = 0
@@ -9443,6 +10407,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     private var isAdjustingSystemVolume = false
     private var suppressSystemVolumeSyncUntil = Date.distantPast
     private var suppressAutomaticExpansionUntil = Date.distantPast
+
+    /// Exposed so AppDelegate can ignore hover expand during Space settle.
+    var suppressAutomaticExpansionUntilDate: Date { suppressAutomaticExpansionUntil }
     private var codingSessionStartDate: Date?
     private var lastWorkReminderDate = Date.distantPast
     private var desktopPetReminderUntil = Date.distantPast
@@ -9457,7 +10424,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     private var lastSystemMetricsDate = Date.distantPast
     private var lastApplicationContextRefreshDate = Date.distantPast
     private var lastNetEaseRefreshDate = Date.distantPast
-    private var lastNetEasePositionTickDate = Date()
+    private var musicLibrarySourceUserPinUntil = Date.distantPast
     private var pendingNetEasePlaylistCoverIDs = Set<String>()
     private var pendingNetEasePlaylistTrackArtworkIDs = Set<String>()
     private var currentNetEaseTrackIdentity = ""
@@ -9465,7 +10432,21 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     private var isResolvingNetEaseDetails = false
     private var netEaseLyricsTask: URLSessionDataTask?
     private var netEaseArtworkTask: URLSessionDataTask?
+    private var lastNetEaseLyricsRetryDate = Date.distantPast
     private var pendingNetEaseSeek: (position: TimeInterval, expiresAt: Date)?
+    private var pendingAppleMusicSeek: (position: TimeInterval, expiresAt: Date)?
+    /// NetEase playhead via timestamp interpolation (same algorithm as Apple Music).
+    private var netEaseProgressClock = PlaybackProgressClock()
+    /// True while the user is scrubbing the seek bar (and briefly after commit settle).
+    @Published private(set) var isSeekingPlayback = false
+    /// Normalized 0...1 preview while `isSeekingPlayback` is locked.
+    @Published private(set) var seekPreviewProgress: Double = 0
+    /// Freeze play/pause icon while scrubbing so system glitches can't flip it.
+    private var seekLockedIsPlaying: Bool?
+    private var seekUnlockWorkItem: DispatchWorkItem?
+    private var currentAppleMusicTrackIdentity = ""
+    private var appleMusicLyricsFinishedIdentity = ""
+    private var appleMusicLyricsTask: Task<Void, Never>?
     private var agentTask: Task<Void, Never>?
     private var agentRequestToken = UUID()
     private var isSelectionTranslationActive = false
@@ -9484,6 +10465,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     private var lastCodexTokenAlertSessionURL: URL?
     private var lastCodexTokenAlertLevel = 0
     private var lastExternalTaskRefreshDate = Date.distantPast
+    private var lastExclusiveAudioReconcileDate = Date.distantPast
     private var isRefreshingExternalTaskStates = false
     private var observedExternalTaskStates: [String: ExternalTaskState] = [:]
     private var hasSeededExternalTaskStates = false
@@ -9515,8 +10497,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         super.init()
         AgentCredentialStore.clearKeychainOverrideIfBundled()
         agentHasAPIKey = AgentCredentialStore.currentAPIKey() != nil
-        _ = LumaLicenseManager.ensureTrialStarted()
-        licenseStatus = LumaLicenseManager.currentStatus()
         refreshSystemMetrics(force: true)
         refreshPetWeatherIfNeeded(now: Date())
         timer = Timer.scheduledTimer(
@@ -9526,47 +10506,13 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             userInfo: nil,
             repeats: true
         )
-    }
-
-    var isProActive: Bool {
-        #if LUMA_APP_STORE
-        // App Store lite has no external license; remaining features stay available.
-        true
-        #else
-        licenseStatus.isProActive
-        #endif
-    }
-
-    func refreshLicenseStatus() {
-        licenseStatus = LumaLicenseManager.currentStatus()
-    }
-
-    @discardableResult
-    func activateLicense(key: String) throws -> LumaLicenseRecord {
-        let record = try LumaLicenseManager.activate(key: key)
-        refreshLicenseStatus()
-        return record
-    }
-
-    func deactivateLicense() {
-        LumaLicenseManager.deactivate()
-        refreshLicenseStatus()
-    }
-
-    func presentProUpgradePrompt(feature: String) {
-        let message: String
-        switch licenseStatus.phase {
-        case .free:
-            message = "「\(feature)」需要 Pro。试用已结束，¥28 起即可解锁。"
-        case .trial:
-            message = "「\(feature)」属于 Pro 能力（试用期内应可用）。请更新许可证状态后重试。"
-        case .pro:
-            message = "「\(feature)」暂时不可用。"
+        AppleMusicService.shared.startMonitoring { [weak self] in
+            self?.applyAppleMusicNowPlaying(AppleMusicService.shared.currentTrack)
         }
-        agentStatus = "Pro"
-        agentResponse = message + "\n\n菜单栏胶囊 → 许可证… 可激活或前往购买。"
-        requestDesktopPetMessage?("升级 Pro 就能用\(feature)啦。")
     }
+
+    /// Always unlocked while preparing Mac App Store / free distribution.
+    var isProActive: Bool { true }
 
     var currentTrack: LocalTrack? {
         if selectedNetEasePlaylistID != nil,
@@ -9937,6 +10883,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var compactMusicTitle: String {
+        if isDisplayingAppleMusicNowPlaying {
+            return displayedTitle
+        }
         if isNetEaseContext, !netEasePlaylists.isEmpty {
             return "NetEase Playlists"
         }
@@ -9945,6 +10894,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var compactMusicSubtitle: String {
+        if isDisplayingAppleMusicNowPlaying {
+            return displayedArtist
+        }
         if isNetEaseContext, let playlist = netEasePlaylists.first {
             return playlist.name
         }
@@ -9953,6 +10905,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var displayedTitle: String {
+        if isDisplayingAppleMusicNowPlaying, let appleMusicNowPlaying {
+            return appleMusicNowPlaying.title
+        }
         if isDisplayingNetEaseNowPlaying, let netEaseNowPlaying {
             return netEaseNowPlaying.title
         }
@@ -9960,6 +10915,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var displayedArtist: String {
+        if isDisplayingAppleMusicNowPlaying, let appleMusicNowPlaying {
+            return appleMusicNowPlaying.artist
+        }
         if isDisplayingNetEaseNowPlaying, let netEaseNowPlaying {
             return netEaseNowPlaying.artist
         }
@@ -9967,6 +10925,11 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var displayedSubtitle: String {
+        if isDisplayingAppleMusicNowPlaying, let appleMusicNowPlaying {
+            return appleMusicNowPlaying.album.isEmpty
+                ? appleMusicNowPlaying.artist
+                : "\(appleMusicNowPlaying.artist) • \(appleMusicNowPlaying.album)"
+        }
         if isDisplayingNetEaseNowPlaying, let netEaseNowPlaying {
             return netEaseNowPlaying.album.isEmpty
                 ? netEaseNowPlaying.artist
@@ -9976,6 +10939,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var displayedArtworkData: Data? {
+        if isDisplayingAppleMusicNowPlaying {
+            return appleMusicNowPlaying?.artworkData ?? resolvedAppleMusicTrack?.artworkData
+        }
         if isDisplayingNetEaseNowPlaying, let netEaseNowPlaying {
             return resolvedNetEaseTrack?.artworkData ?? netEaseNowPlaying.artworkData
         }
@@ -9983,25 +10949,71 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var displayedPosition: TimeInterval {
-        isDisplayingNetEaseNowPlaying ? (netEaseNowPlaying?.position ?? 0) : position
+        if isSeekingPlayback {
+            return max(0, displayedDuration * seekPreviewProgress)
+        }
+        if isDisplayingAppleMusicNowPlaying {
+            return AppleMusicService.shared.playbackTime
+        }
+        if isDisplayingNetEaseNowPlaying {
+            return netEaseProgressClock.calculatedCurrentTime()
+        }
+        return position
     }
 
     var displayedDuration: TimeInterval {
-        isDisplayingNetEaseNowPlaying ? (netEaseNowPlaying?.duration ?? 0) : duration
+        if isDisplayingAppleMusicNowPlaying {
+            return appleMusicNowPlaying?.duration ?? AppleMusicService.shared.duration
+        }
+        if isDisplayingNetEaseNowPlaying {
+            return netEaseNowPlaying?.duration ?? netEaseProgressClock.duration
+        }
+        return duration
     }
 
     var displayedIsPlaying: Bool {
-        isDisplayingNetEaseNowPlaying ? (netEaseNowPlaying?.isPlaying ?? false) : isPlaying
+        if isSeekingPlayback, let seekLockedIsPlaying {
+            return seekLockedIsPlaying
+        }
+        if isDisplayingAppleMusicNowPlaying {
+            // Single source of truth: Music.app player state mirrored by AppleMusicService.
+            return AppleMusicService.shared.playerState == .playing
+        }
+        if isDisplayingNetEaseNowPlaying {
+            return netEaseNowPlaying?.isPlaying ?? netEaseProgressClock.isPlaying
+        }
+        return isPlaying
     }
 
     var displayedProgress: Double {
+        if isSeekingPlayback {
+            return min(1, max(0, seekPreviewProgress))
+        }
         let duration = displayedDuration
         guard duration > 0 else { return 0 }
         return min(1, max(0, displayedPosition / duration))
     }
 
+    var isDisplayingAppleMusicNowPlaying: Bool {
+        // Prefer the visible Apple Music tab so artwork/lyrics stay bound even if
+        // exclusive-playback flags briefly clear isUsingAppleMusic.
+        (musicLibrarySource == .appleMusic && appleMusicNowPlaying != nil)
+            || isUsingAppleMusic
+            || (audioPlayer == nil && isAppleMusicContext && appleMusicNowPlaying != nil)
+    }
+
     var isDisplayingNetEaseNowPlaying: Bool {
         isUsingNetEase || (audioPlayer == nil && isNetEaseContext && netEaseNowPlaying != nil)
+    }
+
+    private var isAppleMusicContext: Bool {
+        activeExternalBundleIdentifier == "com.apple.Music"
+    }
+
+    private var shouldRouteControlsToAppleMusic: Bool {
+        isUsingAppleMusic
+            || musicLibrarySource == .appleMusic
+            || (audioPlayer == nil && isAppleMusicContext)
     }
 
     private var shouldRouteControlsToNetEase: Bool {
@@ -10011,7 +11023,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     private var shouldRouteControlsToSystemPlayer: Bool {
         guard audioPlayer == nil else { return false }
         return [
-            "com.apple.Music",
             "com.spotify.client",
             "org.videolan.vlc",
             "com.colliderli.iina"
@@ -10024,20 +11035,43 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var displayedTrackList: [LocalTrack] {
-        if selectedNetEasePlaylistID != nil {
-            return selectedNetEasePlaylistTracks
+        switch musicLibrarySource {
+        case .netEase:
+            if selectedNetEasePlaylistID != nil {
+                return selectedNetEasePlaylistTracks
+            }
+            return tracks
+        case .appleMusic:
+            // Apple Music mirrors Music.app — no local track catalog yet.
+            return []
+        case .local:
+            return tracks.filter { $0.playbackSource == .direct }
         }
-        return tracks
     }
 
     var displayedTrackListMessage: String {
-        if selectedNetEasePlaylistID != nil {
-            return selectedNetEasePlaylistTracks.isEmpty ? scanMessage : ""
+        switch musicLibrarySource {
+        case .netEase:
+            if selectedNetEasePlaylistID != nil {
+                return selectedNetEasePlaylistTracks.isEmpty ? scanMessage : ""
+            }
+            return scanMessage
+        case .appleMusic:
+            if appleMusicNowPlaying != nil {
+                return "正在通过 Apple Music（Music.app）播放"
+            }
+            return "在 Music.app 中播放歌曲后，将显示在这里"
+        case .local:
+            return tracks.filter { $0.playbackSource == .direct }.isEmpty
+                ? (scanMessage.isEmpty ? "没有本地歌曲" : scanMessage)
+                : ""
         }
-        return scanMessage
     }
 
     var displayedLyricsTrack: LocalTrack? {
+        if isDisplayingAppleMusicNowPlaying {
+            return resolvedAppleMusicTrack ?? appleMusicPlaceholderTrack
+        }
         guard isDisplayingNetEaseNowPlaying, let netEaseNowPlaying else { return currentTrack }
         if let resolvedNetEaseTrack {
             return resolvedNetEaseTrack
@@ -10057,11 +11091,85 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
     }
 
+    private var appleMusicPlaceholderTrack: LocalTrack? {
+        guard let appleMusicNowPlaying else { return nil }
+        let identity = Self.appleMusicTrackIdentity(
+            title: appleMusicNowPlaying.title,
+            artist: appleMusicNowPlaying.artist,
+            album: appleMusicNowPlaying.album
+        )
+        let id = URL(string: "apple-music://track/\(identity.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "current")")
+            ?? URL(fileURLWithPath: "/apple-music/\(identity)")
+        return LocalTrack(
+            id: id,
+            url: id,
+            title: appleMusicNowPlaying.title,
+            artist: appleMusicNowPlaying.artist,
+            album: appleMusicNowPlaying.album,
+            artworkData: appleMusicNowPlaying.artworkData,
+            lyrics: "",
+            timedLyrics: [],
+            playbackSource: .appleMusic
+        )
+    }
+
     func isCurrentDisplayTrack(_ track: LocalTrack) -> Bool {
         if let displayedLyricsTrack, track == displayedLyricsTrack {
             return true
         }
         return !isDisplayingNetEaseNowPlaying && track == currentTrack
+    }
+
+    func setMusicLibrarySource(_ source: IslandMusicLibrarySource) {
+        let previous = musicLibrarySource
+        musicLibrarySource = source
+        musicLibrarySourceUserPinUntil = Date().addingTimeInterval(1.2)
+        if previous != source {
+            // Switching tabs must silence the previous backend so two players never overlap.
+            activateExclusivePlayback(source: source)
+        }
+        switch source {
+        case .netEase:
+            isUsingNetEase = true
+            isUsingAppleMusic = false
+            refreshNetEasePlaylists()
+            refreshNetEaseNowPlaying(force: true)
+        case .appleMusic:
+            isUsingAppleMusic = true
+            isUsingNetEase = false
+            AppleMusicService.shared.openApplication(activates: false)
+            AppleMusicService.shared.refresh { [weak self] in
+                self?.applyAppleMusicNowPlaying(AppleMusicService.shared.currentTrack)
+                self?.reconcileExclusiveAudioFocus()
+            }
+        case .local:
+            isUsingAppleMusic = false
+            isUsingNetEase = false
+        }
+    }
+
+    /// Keep the library tab aligned with whoever is actually playing.
+    private func syncMusicLibrarySourceToActivePlayback(force: Bool = false) {
+        guard force || Date() >= musicLibrarySourceUserPinUntil else { return }
+
+        let target: IslandMusicLibrarySource?
+        if isUsingAppleMusic, appleMusicNowPlaying != nil {
+            target = .appleMusic
+        } else if isUsingNetEase, netEaseNowPlaying != nil {
+            target = .netEase
+        } else if audioPlayer?.isPlaying == true {
+            target = .local
+        } else {
+            target = nil
+        }
+
+        guard let target else { return }
+        activeMusicSource = target
+        guard musicLibrarySource != target else { return }
+        musicLibrarySource = target
+        if target == .netEase {
+            refreshNetEasePlaylists()
+        }
     }
 
     func scanLocalMusic() {
@@ -10364,11 +11472,15 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             let localURL = resolvedNetEaseLocalTrackURL(path: row.localFilePath, home: home)
             let songIDURL = URL(string: "netease-song://track/\(row.id)")
             let url = localURL ?? songIDURL ?? URL(fileURLWithPath: "/")
+            // Prefer song-id playback so row taps control NetEase (and lyrics can resolve),
+            // even when a local cache file exists.
             let playbackSource: TrackPlaybackSource
-            if let localURL {
+            if row.id.allSatisfy(\.isNumber) {
+                playbackSource = .netEaseSong(id: row.id)
+            } else if let localURL {
                 playbackSource = localURL.pathExtension.lowercased() == "ncm" ? .netEase : .direct
             } else {
-                playbackSource = .netEaseSong(id: row.id)
+                playbackSource = .netEase
             }
 
             return LocalTrack(
@@ -10720,6 +11832,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             netEaseArtworkTask?.cancel()
             resolvedNetEaseTrack = nil
             pendingNetEaseSeek = nil
+            lastNetEaseLyricsRetryDate = .distantPast
         } else if let artworkData = nowPlaying.artworkData,
                   resolvedNetEaseTrack?.artworkData == nil,
                   let songID = resolvedNetEaseSongID
@@ -10728,6 +11841,21 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 songID: songID,
                 requestToken: netEaseDetailsRequestToken,
                 artworkData: artworkData
+            )
+        }
+
+        // Lyrics fetch can fail once and leave an empty resolved track forever — retry.
+        if let resolved = resolvedNetEaseTrack,
+           !resolved.hasLyrics,
+           let songID = Self.netEaseSongID(for: resolved),
+           Date().timeIntervalSince(lastNetEaseLyricsRetryDate) >= 2.5
+        {
+            lastNetEaseLyricsRetryDate = Date()
+            loadNetEaseLyrics(
+                songID: songID,
+                requestToken: netEaseDetailsRequestToken,
+                title: nowPlaying.title,
+                artist: nowPlaying.artist
             )
         }
 
@@ -10762,7 +11890,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         requestToken: UUID
     ) -> Bool {
         guard let track = matchingKnownNetEaseTrack(for: nowPlaying),
-              case .netEaseSong(let songID) = track.playbackSource
+              let songID = Self.netEaseSongID(for: track)
         else {
             return false
         }
@@ -10784,7 +11912,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
         let candidates = selectedNetEasePlaylistTracks + tracks
         return candidates.compactMap { track -> (track: LocalTrack, score: Int)? in
-            guard case .netEaseSong = track.playbackSource else { return nil }
+            guard Self.netEaseSongID(for: track) != nil || track.playbackSource.isNetEaseBacked else {
+                return nil
+            }
 
             let titleKey = Self.normalizedLookupKey(track.title)
             var score: Int
@@ -10831,8 +11961,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         netEaseLyricsTask?.cancel()
         netEaseArtworkTask?.cancel()
 
+        let songURL = URL(string: "netease-song://track/\(songID)") ?? track.url
         resolvedNetEaseTrack = LocalTrack(
-            id: track.id,
+            id: songURL,
             url: track.url,
             title: track.title,
             artist: track.artist,
@@ -10840,10 +11971,15 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             artworkData: track.artworkData,
             lyrics: track.lyrics,
             timedLyrics: track.timedLyrics,
-            playbackSource: track.playbackSource
+            playbackSource: .netEaseSong(id: songID)
         )
 
-        loadNetEaseLyrics(songID: songID, requestToken: token)
+        loadNetEaseLyrics(
+            songID: songID,
+            requestToken: token,
+            title: track.title,
+            artist: track.artist
+        )
         loadNetEaseArtwork(songID: songID, coverURL: nil, requestToken: token)
     }
 
@@ -10927,7 +12063,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
                 self.loadNetEaseLyrics(
                     songID: metadata.id,
-                    requestToken: requestToken
+                    requestToken: requestToken,
+                    title: metadata.title,
+                    artist: metadata.artist
                 )
                 self.loadNetEaseArtwork(
                     metadata: metadata,
@@ -10956,6 +12094,20 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 }
                 guard let match else {
                     self.isResolvingNetEaseDetails = false
+                    if self.resolvedNetEaseTrack == nil {
+                        let url = URL(string: "netease-song://unresolved") ?? URL(fileURLWithPath: "/")
+                        self.resolvedNetEaseTrack = LocalTrack(
+                            id: url,
+                            url: url,
+                            title: title,
+                            artist: artist,
+                            album: album,
+                            artworkData: mediaRemoteArtwork,
+                            lyrics: "",
+                            timedLyrics: [],
+                            playbackSource: .netEaseSong(id: "unresolved")
+                        )
+                    }
                     return
                 }
 
@@ -10975,7 +12127,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                     timedLyrics: [],
                     playbackSource: .netEaseSong(id: match.id)
                 )
-                self.loadNetEaseLyrics(songID: match.id, requestToken: requestToken)
+                self.loadNetEaseLyrics(
+                    songID: match.id,
+                    requestToken: requestToken,
+                    title: match.title,
+                    artist: match.artist.isEmpty ? artist : match.artist
+                )
                 self.loadNetEaseArtwork(
                     songID: match.id,
                     coverURL: nil,
@@ -11001,20 +12158,54 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         return nil
     }
 
-    private func loadNetEaseLyrics(songID: String, requestToken: UUID) {
-        guard !songID.isEmpty, songID.allSatisfy(\.isNumber) else { return }
+    private func loadNetEaseLyrics(
+        songID: String,
+        requestToken: UUID,
+        title: String = "",
+        artist: String = ""
+    ) {
+        let trimmedID = songID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedID.isEmpty else { return }
 
-        if let cachedData = Self.cachedNetEaseLyricsData(id: songID),
+        if trimmedID.allSatisfy(\.isNumber),
+           let cachedData = Self.cachedNetEaseLyricsData(id: trimmedID),
            let lyricResult = Self.parseNetEaseLyricsResponse(cachedData)
         {
             updateResolvedNetEaseTrack(
-                songID: songID,
+                songID: trimmedID,
                 requestToken: requestToken,
                 lyricResult: lyricResult
             )
             return
         }
 
+        if trimmedID.allSatisfy(\.isNumber) {
+            fetchNetEaseLyricsBySongID(
+                songID: trimmedID,
+                requestToken: requestToken,
+                title: title,
+                artist: artist,
+                allowSearchFallback: true
+            )
+            return
+        }
+
+        // Non-numeric IDs (rare): fall back to title/artist search.
+        fetchNetEaseLyricsBySearch(
+            title: title,
+            artist: artist,
+            requestToken: requestToken,
+            expectedSongID: trimmedID
+        )
+    }
+
+    private func fetchNetEaseLyricsBySongID(
+        songID: String,
+        requestToken: UUID,
+        title: String,
+        artist: String,
+        allowSearchFallback: Bool
+    ) {
         var components = URLComponents()
         components.scheme = "https"
         components.host = "music.163.com"
@@ -11029,7 +12220,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 8
-        request.cachePolicy = .returnCacheDataElseLoad
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("https://music.163.com/", forHTTPHeaderField: "Referer")
         request.setValue(
             "Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/605.1.15",
@@ -11039,20 +12230,81 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         netEaseLyricsTask?.cancel()
         netEaseLyricsTask = URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
             let lyricResult = data.flatMap(Self.parseNetEaseLyricsResponse)
-            guard let lyricResult else { return }
-            if let data {
-                Self.storeNetEaseLyricsData(data, id: songID)
+            if let lyricResult {
+                if let data {
+                    Self.storeNetEaseLyricsData(data, id: songID)
+                }
+                DispatchQueue.main.async { [weak self] in
+                    self?.updateResolvedNetEaseTrack(
+                        songID: songID,
+                        requestToken: requestToken,
+                        lyricResult: lyricResult
+                    )
+                }
+                return
             }
 
+            guard allowSearchFallback else { return }
             DispatchQueue.main.async { [weak self] in
-                self?.updateResolvedNetEaseTrack(
-                    songID: songID,
+                self?.fetchNetEaseLyricsBySearch(
+                    title: title,
+                    artist: artist,
                     requestToken: requestToken,
-                    lyricResult: lyricResult
+                    expectedSongID: songID
                 )
             }
         }
         netEaseLyricsTask?.resume()
+    }
+
+    private func fetchNetEaseLyricsBySearch(
+        title: String,
+        artist: String,
+        requestToken: UUID,
+        expectedSongID: String
+    ) {
+        let queryTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let queryArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !queryTitle.isEmpty else { return }
+
+        Task { [weak self] in
+            guard let self else { return }
+            let match = try? await NetEaseAgentSearchClient.bestSong(
+                title: queryTitle,
+                artist: queryArtist
+            )
+            guard self.netEaseDetailsRequestToken == requestToken else { return }
+            guard let match, match.id.allSatisfy(\.isNumber) else { return }
+
+            // Keep resolved track ID stable when we already have one; just pull lyrics.
+            if expectedSongID != match.id,
+               let current = self.resolvedNetEaseTrack,
+               case .netEaseSong(let currentID) = current.playbackSource,
+               currentID == expectedSongID
+            {
+                let url = URL(string: "netease-song://track/\(match.id)")
+                    ?? URL(fileURLWithPath: "/")
+                self.resolvedNetEaseTrack = LocalTrack(
+                    id: url,
+                    url: url,
+                    title: current.title,
+                    artist: current.artist,
+                    album: current.album,
+                    artworkData: current.artworkData,
+                    lyrics: current.lyrics,
+                    timedLyrics: current.timedLyrics,
+                    playbackSource: .netEaseSong(id: match.id)
+                )
+            }
+
+            self.fetchNetEaseLyricsBySongID(
+                songID: match.id,
+                requestToken: requestToken,
+                title: queryTitle,
+                artist: queryArtist,
+                allowSearchFallback: false
+            )
+        }
     }
 
     private func loadNetEaseArtwork(metadata: NetEaseTrackMetadata, requestToken: UUID) {
@@ -11198,7 +12450,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         switch track.playbackSource {
         case .netEaseSong(let songID):
             return songID
-        case .direct, .netEase:
+        case .direct, .netEase, .appleMusic:
             guard track.id.scheme == "netease-song" else { return nil }
             let songID = track.id.lastPathComponent
             return songID.isEmpty ? nil : songID
@@ -11435,11 +12687,13 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     nonisolated private static func netEaseTrackIdentity(
         title: String,
         artist: String,
-        album: String
+        album: String = ""
     ) -> String {
-        [title, artist, album]
-            .map(normalizedLookupKey)
-            .joined(separator: "|")
+        // MediaRemote often flickers album/artist (e.g. real artist ↔ "NetEase Cloud Music"),
+        // which used to reset lyric resolution forever. Title is the stable signal.
+        _ = album
+        _ = artist
+        return normalizedLookupKey(title)
     }
 
     private func refreshMissingNetEasePlaylistCovers() {
@@ -12186,9 +13440,68 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     func togglePlayback() {
+        dismissTaskCompletionNoticeForInteraction()
+
+        let applePlaying =
+            (appleMusicNowPlaying?.isPlaying == true) || AppleMusicService.shared.isPlaying
+        let netEasePlaying = netEaseNowPlaying?.isPlaying == true
+        let localPlaying = audioPlayer?.isPlaying == true
+
+        // Case 1: Apple Music is currently playing → pause NetEase, playpause Music.
+        if applePlaying, !netEasePlaying {
+            executeTargetedPlayPause(target: .appleMusic, currentlyPlaying: true)
+            return
+        }
+
+        // Case 2: NetEase is currently playing → pause Music, playpause NetEase.
+        if netEasePlaying, !applePlaying {
+            executeTargetedPlayPause(target: .netEase, currentlyPlaying: true)
+            return
+        }
+
+        // Both reporting play — hard-pause both by bundle ID (no global media key).
+        if applePlaying, netEasePlaying {
+            let preferred: IslandMusicLibrarySource =
+                (activeMusicSource == .netEase || musicLibrarySource == .netEase)
+                ? .netEase
+                : .appleMusic
+            activeMusicSource = preferred
+            isUsingAppleMusic = preferred == .appleMusic
+            isUsingNetEase = preferred == .netEase
+            pauseLocalPlaybackEngine()
+            markAppleMusicPausedInUI()
+            markNetEasePausedInUI()
+            DispatchQueue.global(qos: .userInitiated).async {
+                ExclusiveAudioFocus.pauseAppleMusic()
+                ExclusiveAudioFocus.pauseNetEase()
+            }
+            return
+        }
+
+        if localPlaying {
+            audioPlayer?.pause()
+            isPlaying = false
+            return
+        }
+
+        // Case 3: Idle — last active / resolved player only; pause the other first.
+        let idleTarget = resolvedExclusivePlaybackTarget()
+        switch idleTarget {
+        case .appleMusic:
+            executeTargetedPlayPause(target: .appleMusic, currentlyPlaying: false)
+            return
+        case .netEase:
+            executeTargetedPlayPause(target: .netEase, currentlyPlaying: false)
+            return
+        case .local:
+            break
+        }
+
         if let currentTrack, currentTrack.playbackSource == .direct {
             if audioPlayer == nil {
-                playDirectTrack(currentTrack)
+                ensureSinglePlayerPlaying(target: .local) {
+                    self.playDirectTrack(currentTrack)
+                }
                 return
             }
 
@@ -12196,24 +13509,30 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 audioPlayer?.pause()
                 isPlaying = false
             } else {
-                isPlaying = audioPlayer?.play() ?? false
+                ensureSinglePlayerPlaying(target: .local) {
+                    self.isPlaying = self.audioPlayer?.play() ?? false
+                }
             }
             return
         }
 
-        if shouldRouteControlsToNetEase {
-            isUsingNetEase = true
-            sendNetEaseCommand(.togglePlayPause)
-            return
-        }
-
-        if shouldRouteControlsToSystemPlayer, NetEaseBridge.shared.send(.togglePlayPause) {
+        if shouldRouteControlsToSystemPlayer {
+            // Spotify / VLC / IINA — silence AM + NetEase only; never NX_KEYTYPE / MediaRemote play.
+            pauseLocalPlaybackEngine()
+            markAppleMusicPausedInUI()
+            markNetEasePausedInUI()
+            DispatchQueue.global(qos: .userInitiated).async {
+                ExclusiveAudioFocus.pauseAppleMusic()
+                ExclusiveAudioFocus.pauseNetEase()
+            }
             return
         }
 
         guard !tracks.isEmpty else {
-            if netEaseNowPlaying != nil {
-                sendNetEaseCommand(.togglePlayPause)
+            if appleMusicNowPlaying != nil || musicLibrarySource == .appleMusic {
+                executeTargetedPlayPause(target: .appleMusic, currentlyPlaying: false)
+            } else if netEaseNowPlaying != nil || musicLibrarySource == .netEase {
+                executeTargetedPlayPause(target: .netEase, currentlyPlaying: false)
             } else {
                 scanLocalMusic()
             }
@@ -12221,7 +13540,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
 
         if let currentTrack, currentTrack.playbackSource.isNetEaseBacked {
-            playNetEaseTrack(currentTrack)
+            ensureSinglePlayerPlaying(target: .netEase) {
+                self.playNetEaseTrack(currentTrack)
+            }
             return
         }
 
@@ -12233,20 +13554,351 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             audioPlayer?.pause()
             isPlaying = false
         } else {
-            isPlaying = audioPlayer?.play() ?? false
+            ensureSinglePlayerPlaying(target: .local) {
+                self.isPlaying = self.audioPlayer?.play() ?? false
+            }
+        }
+    }
+
+    /// Pause the rival by bundle-ID AppleScript, then `playpause` only the target app.
+    /// Never posts NX_KEYTYPE_PLAY / CGEvent / global MediaRemote.
+    private func executeTargetedPlayPause(
+        target: IslandMusicLibrarySource,
+        currentlyPlaying: Bool
+    ) {
+        exclusivePlayGeneration &+= 1
+        let generation = exclusivePlayGeneration
+
+        activeMusicSource = target
+        pauseLocalPlaybackEngine()
+
+        switch target {
+        case .appleMusic:
+            isUsingAppleMusic = true
+            isUsingNetEase = false
+            markNetEasePausedInUI()
+            // Do not flip Play/Pause icon from the click alone — wait for Music.app
+            // player state after the targeted playpause, then bind UI to that.
+        case .netEase:
+            isUsingNetEase = true
+            isUsingAppleMusic = false
+            markAppleMusicPausedInUI()
+            if currentlyPlaying {
+                markNetEasePausedInUI()
+            } else if let netEaseNowPlaying {
+                self.netEaseNowPlaying = netEaseNowPlaying.with(isPlaying: true)
+            }
+        case .local:
+            isUsingAppleMusic = false
+            isUsingNetEase = false
+            markAppleMusicPausedInUI()
+            markNetEasePausedInUI()
+        }
+        syncMusicLibrarySourceToActivePlayback(force: false)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            switch target {
+            case .appleMusic:
+                ExclusiveAudioFocus.pauseNetEase()
+                ExclusiveAudioFocus.playPauseAppleMusic()
+            case .netEase:
+                ExclusiveAudioFocus.pauseAppleMusic()
+                ExclusiveAudioFocus.playPauseNetEase()
+            case .local:
+                ExclusiveAudioFocus.pauseAppleMusic()
+                ExclusiveAudioFocus.pauseNetEase()
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                guard let self, self.exclusivePlayGeneration == generation else { return }
+                if target == .appleMusic {
+                    // Verify return status from Music.app — icon follows playerState only.
+                    AppleMusicService.shared.refresh {
+                        self.applyAppleMusicNowPlaying(AppleMusicService.shared.currentTrack)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Which backend should own the next play/pause from the island controls.
+    private func resolvedExclusivePlaybackTarget() -> IslandMusicLibrarySource {
+        // The visible library tab is the source of truth for the play button.
+        switch musicLibrarySource {
+        case .appleMusic:
+            return .appleMusic
+        case .netEase:
+            return .netEase
+        case .local:
+            if activeMusicSource == .appleMusic, appleMusicNowPlaying != nil {
+                return .appleMusic
+            }
+            if activeMusicSource == .netEase, netEaseNowPlaying != nil {
+                return .netEase
+            }
+            if isUsingAppleMusic, appleMusicNowPlaying != nil {
+                return .appleMusic
+            }
+            if isUsingNetEase, netEaseNowPlaying != nil {
+                return .netEase
+            }
+            if shouldRouteControlsToAppleMusic, appleMusicNowPlaying != nil {
+                return .appleMusic
+            }
+            if shouldRouteControlsToNetEase, netEaseNowPlaying != nil {
+                return .netEase
+            }
+            return .local
+        }
+    }
+
+    /// Pause every rival by bundle-ID AppleScript, wait 50ms, then play only `target`.
+    /// Never synthesizes NX_KEYTYPE_PLAY / global media keys.
+    private func ensureSinglePlayerPlaying(
+        target: IslandMusicLibrarySource,
+        playAction: (() -> Void)? = nil
+    ) {
+        exclusivePlayGeneration &+= 1
+        let generation = exclusivePlayGeneration
+
+        activeMusicSource = target
+        switch target {
+        case .appleMusic:
+            isUsingAppleMusic = true
+            isUsingNetEase = false
+            pauseLocalPlaybackEngine()
+            markNetEasePausedInUI()
+        case .netEase:
+            isUsingNetEase = true
+            isUsingAppleMusic = false
+            pauseLocalPlaybackEngine()
+            markAppleMusicPausedInUI()
+        case .local:
+            isUsingAppleMusic = false
+            isUsingNetEase = false
+            markAppleMusicPausedInUI()
+            markNetEasePausedInUI()
+        }
+        syncMusicLibrarySourceToActivePlayback(force: false)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            switch target {
+            case .appleMusic:
+                ExclusiveAudioFocus.pauseNetEase()
+            case .netEase:
+                ExclusiveAudioFocus.pauseAppleMusic()
+            case .local:
+                ExclusiveAudioFocus.pauseAppleMusic()
+                ExclusiveAudioFocus.pauseNetEase()
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                guard let self, self.exclusivePlayGeneration == generation else { return }
+                if let playAction {
+                    playAction()
+                    return
+                }
+                switch target {
+                case .appleMusic:
+                    // Bundle-ID play — also mirror into AppleMusicService UI clock.
+                    ExclusiveAudioFocus.playAppleMusic()
+                    AppleMusicService.shared.play()
+                    if var info = self.appleMusicNowPlaying {
+                        info.isPlaying = true
+                        self.appleMusicNowPlaying = info
+                    }
+                case .netEase:
+                    ExclusiveAudioFocus.playNetEase()
+                    _ = NetEaseBridge.shared.playNetEaseOnly()
+                    if let netEaseNowPlaying = self.netEaseNowPlaying {
+                        self.netEaseNowPlaying = netEaseNowPlaying.with(isPlaying: true)
+                    }
+                case .local:
+                    self.isPlaying = self.audioPlayer?.play() ?? false
+                }
+            }
+        }
+    }
+
+    /// Marks `source` as the sole active backend and pauses every other player.
+    private func activateExclusivePlayback(source: IslandMusicLibrarySource) {
+        // Used by next/previous/open — pause rivals immediately; play is caller's job.
+        exclusivePlayGeneration &+= 1
+        activeMusicSource = source
+        switch source {
+        case .appleMusic:
+            isUsingAppleMusic = true
+            isUsingNetEase = false
+            pauseLocalPlaybackEngine()
+            markNetEasePausedInUI()
+            DispatchQueue.global(qos: .userInitiated).async {
+                ExclusiveAudioFocus.pauseNetEase()
+            }
+        case .netEase:
+            isUsingNetEase = true
+            isUsingAppleMusic = false
+            pauseLocalPlaybackEngine()
+            markAppleMusicPausedInUI()
+            DispatchQueue.global(qos: .userInitiated).async {
+                ExclusiveAudioFocus.pauseAppleMusic()
+            }
+        case .local:
+            isUsingAppleMusic = false
+            isUsingNetEase = false
+            markAppleMusicPausedInUI()
+            markNetEasePausedInUI()
+            DispatchQueue.global(qos: .userInitiated).async {
+                ExclusiveAudioFocus.pauseAppleMusic()
+                ExclusiveAudioFocus.pauseNetEase()
+            }
+        }
+        syncMusicLibrarySourceToActivePlayback(force: false)
+    }
+
+    private func silenceOtherPlaybackSources(except source: IslandMusicLibrarySource) {
+        switch source {
+        case .appleMusic:
+            pauseLocalPlaybackEngine()
+            pauseNetEasePlaybackEngine()
+        case .netEase:
+            pauseLocalPlaybackEngine()
+            pauseAppleMusicPlaybackEngine()
+        case .local:
+            pauseNetEasePlaybackEngine()
+            pauseAppleMusicPlaybackEngine()
+        }
+    }
+
+    /// If multiple backends report playing, keep one and hard-pause the rest by bundle ID.
+    private func reconcileExclusiveAudioFocus() {
+        let applePlaying = (appleMusicNowPlaying?.isPlaying == true) || AppleMusicService.shared.isPlaying
+        let netEasePlaying = netEaseNowPlaying?.isPlaying == true
+        let localPlaying = audioPlayer?.isPlaying == true
+        let playingCount = [applePlaying, netEasePlaying, localPlaying].filter { $0 }.count
+        guard playingCount > 1 else { return }
+
+        // Avoid spamming AppleScript every 100ms timer tick while dual-play residue clears.
+        let now = Date()
+        guard now.timeIntervalSince(lastExclusiveAudioReconcileDate) >= 1.0 else { return }
+        lastExclusiveAudioReconcileDate = now
+
+        let preferred: IslandMusicLibrarySource = {
+            switch musicLibrarySource {
+            case .appleMusic where applePlaying:
+                return .appleMusic
+            case .netEase where netEasePlaying:
+                return .netEase
+            case .local where localPlaying:
+                return .local
+            default:
+                break
+            }
+            switch activeMusicSource {
+            case .appleMusic where applePlaying:
+                return .appleMusic
+            case .netEase where netEasePlaying:
+                return .netEase
+            case .local where localPlaying:
+                return .local
+            default:
+                break
+            }
+            // Default priority when both streamers collide: Apple Music.
+            if applePlaying { return .appleMusic }
+            if netEasePlaying { return .netEase }
+            return .local
+        }()
+
+        activeMusicSource = preferred
+        switch preferred {
+        case .appleMusic:
+            isUsingAppleMusic = true
+            isUsingNetEase = false
+            pauseLocalPlaybackEngine()
+            markNetEasePausedInUI()
+            DispatchQueue.global(qos: .userInitiated).async {
+                ExclusiveAudioFocus.pauseNetEase()
+            }
+        case .netEase:
+            isUsingNetEase = true
+            isUsingAppleMusic = false
+            pauseLocalPlaybackEngine()
+            markAppleMusicPausedInUI()
+            DispatchQueue.global(qos: .userInitiated).async {
+                ExclusiveAudioFocus.pauseAppleMusic()
+            }
+        case .local:
+            isUsingAppleMusic = false
+            isUsingNetEase = false
+            markAppleMusicPausedInUI()
+            markNetEasePausedInUI()
+            DispatchQueue.global(qos: .userInitiated).async {
+                ExclusiveAudioFocus.pauseAppleMusic()
+                ExclusiveAudioFocus.pauseNetEase()
+            }
+        }
+    }
+
+    private func markAppleMusicPausedInUI() {
+        if var info = appleMusicNowPlaying {
+            info.isPlaying = false
+            appleMusicNowPlaying = info
+        }
+    }
+
+    private func markNetEasePausedInUI() {
+        if let netEaseNowPlaying {
+            self.netEaseNowPlaying = netEaseNowPlaying.with(isPlaying: false)
+        }
+    }
+
+    private func pauseLocalPlaybackEngine() {
+        guard audioPlayer != nil else {
+            isPlaying = false
+            return
+        }
+        audioPlayer?.pause()
+        isPlaying = false
+    }
+
+    private func pauseNetEasePlaybackEngine() {
+        markNetEasePausedInUI()
+        DispatchQueue.global(qos: .userInitiated).async {
+            ExclusiveAudioFocus.pauseNetEase()
+        }
+        if activeMusicSource != .netEase, musicLibrarySource != .netEase {
+            isUsingNetEase = false
+        }
+    }
+
+    private func pauseAppleMusicPlaybackEngine() {
+        markAppleMusicPausedInUI()
+        DispatchQueue.global(qos: .userInitiated).async {
+            ExclusiveAudioFocus.pauseAppleMusic()
+        }
+        if activeMusicSource != .appleMusic, musicLibrarySource != .appleMusic {
+            isUsingAppleMusic = false
         }
     }
 
     func play(track: LocalTrack) {
+        dismissTaskCompletionNoticeForInteraction()
         if selectedNetEasePlaylistID != nil,
            let index = selectedNetEasePlaylistTracks.firstIndex(of: track)
         {
             currentIndex = index
+        } else if let index = selectedNetEasePlaylistTracks.firstIndex(where: {
+            $0.id == track.id || ($0.title == track.title && $0.artist == track.artist)
+        }) {
+            currentIndex = index
         } else if let index = tracks.firstIndex(of: track) {
             currentIndex = index
-        } else {
-            return
+        } else if let index = tracks.firstIndex(where: {
+            $0.id == track.id || ($0.title == track.title && $0.artist == track.artist)
+        }) {
+            currentIndex = index
         }
+        // Always play the tapped track — never silently no-op when list identity drifts.
 
         if track.playbackSource.isNetEaseBacked {
             playNetEaseTrack(track)
@@ -12257,9 +13909,18 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     func nextTrack() {
+        dismissTaskCompletionNoticeForInteraction()
+        if shouldRouteControlsToAppleMusic {
+            ensureSinglePlayerPlaying(target: .appleMusic) {
+                AppleMusicService.shared.next()
+            }
+            return
+        }
+
         if shouldRouteControlsToNetEase {
-            isUsingNetEase = true
-            sendNetEaseCommand(.nextTrack)
+            ensureSinglePlayerPlaying(target: .netEase) {
+                _ = NetEaseBridge.shared.send(.nextTrack)
+            }
             return
         }
 
@@ -12274,9 +13935,18 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     func previousTrack() {
+        dismissTaskCompletionNoticeForInteraction()
+        if shouldRouteControlsToAppleMusic {
+            ensureSinglePlayerPlaying(target: .appleMusic) {
+                AppleMusicService.shared.previous()
+            }
+            return
+        }
+
         if shouldRouteControlsToNetEase {
-            isUsingNetEase = true
-            sendNetEaseCommand(.previousTrack)
+            ensureSinglePlayerPlaying(target: .netEase) {
+                _ = NetEaseBridge.shared.send(.previousTrack)
+            }
             return
         }
 
@@ -12290,33 +13960,115 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         playCurrentSelection()
     }
 
+    /// Drag start / move — UI only. Never pause or seek the system player here.
+    func beginSeekPreview(progress: Double) {
+        let clamped = min(1, max(0, progress))
+        if !isSeekingPlayback {
+            seekLockedIsPlaying = displayedIsPlaying
+            isSeekingPlayback = true
+        }
+        seekUnlockWorkItem?.cancel()
+        seekUnlockWorkItem = nil
+        seekPreviewProgress = clamped
+    }
+
+    /// Drag end — atomic seek once, keep the lock until the player settles.
+    func commitSeek(progress: Double) {
+        let clamped = min(1, max(0, progress))
+        let wasPlaying = seekLockedIsPlaying ?? displayedIsPlaying
+        seekLockedIsPlaying = wasPlaying
+        isSeekingPlayback = true
+        seekPreviewProgress = clamped
+        seekUnlockWorkItem?.cancel()
+
+        performSeek(to: clamped, resumeIfPlaying: wasPlaying)
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            // If we intended to keep playing, ignore a stale paused flash before unlocking.
+            if wasPlaying {
+                self.ensurePlaybackResumedAfterSeek()
+            }
+            self.isSeekingPlayback = false
+            self.seekLockedIsPlaying = nil
+            self.seekUnlockWorkItem = nil
+        }
+        seekUnlockWorkItem = workItem
+        // Hold the scrub lock briefly so async pause notifications from Music.app don't win.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: workItem)
+    }
+
     func seek(to progress: Double) {
+        commitSeek(progress: progress)
+    }
+
+    /// Internal seek transport — captures play state and forces resume when needed.
+    private func performSeek(to progress: Double, resumeIfPlaying: Bool) {
         let clampedProgress = min(1, max(0, progress))
 
+        if shouldRouteControlsToAppleMusic {
+            let duration = max(displayedDuration, appleMusicNowPlaying?.duration ?? 0)
+            guard duration > 0 else { return }
+            let newTime = duration * clampedProgress
+            if let appleMusicNowPlaying {
+                var updated = appleMusicNowPlaying.with(position: newTime)
+                updated.isPlaying = resumeIfPlaying
+                self.appleMusicNowPlaying = updated
+            }
+            pendingAppleMusicSeek = (
+                position: newTime,
+                expiresAt: Date().addingTimeInterval(1.6)
+            )
+            AppleMusicService.shared.seek(to: newTime, resumePlayback: resumeIfPlaying)
+            if resumeIfPlaying {
+                // Immediate local resume signal; AppleScript also issues `play`.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                    guard let self, self.seekLockedIsPlaying == true else { return }
+                    AppleMusicService.shared.play()
+                    if var info = self.appleMusicNowPlaying {
+                        info.isPlaying = true
+                        self.appleMusicNowPlaying = info
+                    }
+                }
+            }
+            objectWillChange.send()
+            return
+        }
+
         if shouldRouteControlsToNetEase {
-            let duration = displayedDuration
+            let duration = max(displayedDuration, netEaseNowPlaying?.duration ?? 0)
             guard duration > 0 else { return }
 
             let newTime = duration * clampedProgress
+            netEaseProgressClock.seek(to: newTime)
+            if resumeIfPlaying {
+                netEaseProgressClock.resumePlayback()
+            }
             if let netEaseNowPlaying {
-                self.netEaseNowPlaying = netEaseNowPlaying.with(position: newTime)
+                self.netEaseNowPlaying = netEaseNowPlaying
+                    .with(position: newTime)
+                    .with(isPlaying: resumeIfPlaying)
             }
 
-            isUsingNetEase = true
             pendingNetEaseSeek = (
                 position: newTime,
                 expiresAt: Date().addingTimeInterval(1.4)
             )
-            if NetEaseBridge.shared.seek(to: newTime) {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
-                    self?.refreshNetEaseNowPlaying(force: true)
+            _ = NetEaseBridge.shared.seek(to: newTime)
+            if resumeIfPlaying {
+                _ = NetEaseBridge.shared.playNetEaseOnly()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                    guard let self, self.seekLockedIsPlaying == true else { return }
+                    _ = NetEaseBridge.shared.playNetEaseOnly()
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.72) { [weak self] in
-                    self?.refreshNetEaseNowPlaying(force: true)
-                }
-            } else {
-                pendingNetEaseSeek = nil
-                refreshNetEaseNowPlaying(force: true)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+                guard let self, !self.isSeekingPlayback else { return }
+                self.refreshNetEaseNowPlaying(force: true)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.72) { [weak self] in
+                guard let self, !self.isSeekingPlayback else { return }
+                self.refreshNetEaseNowPlaying(force: true)
             }
             return
         }
@@ -12325,6 +14077,33 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         let newTime = duration * clampedProgress
         audioPlayer.currentTime = newTime
         position = newTime
+        if resumeIfPlaying, !audioPlayer.isPlaying {
+            isPlaying = audioPlayer.play()
+        }
+    }
+
+    private func ensurePlaybackResumedAfterSeek() {
+        if shouldRouteControlsToAppleMusic {
+            if appleMusicNowPlaying?.isPlaying != true || !AppleMusicService.shared.isPlaying {
+                AppleMusicService.shared.play()
+            }
+            if var info = appleMusicNowPlaying {
+                info.isPlaying = true
+                appleMusicNowPlaying = info
+            }
+            return
+        }
+        if shouldRouteControlsToNetEase {
+            _ = NetEaseBridge.shared.playNetEaseOnly()
+            if let netEaseNowPlaying {
+                self.netEaseNowPlaying = netEaseNowPlaying.with(isPlaying: true)
+            }
+            netEaseProgressClock.resumePlayback()
+            return
+        }
+        if let audioPlayer, !audioPlayer.isPlaying {
+            isPlaying = audioPlayer.play()
+        }
     }
 
     func collapse() {
@@ -12351,6 +14130,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     func suppressAutomaticExpansion(for duration: TimeInterval) {
         suppressAutomaticExpansionUntil = Date().addingTimeInterval(duration)
+    }
+
+    /// Explicit user / product expand. System notifications (Spaces, playerInfo) must not call this.
+    func expandFromUserAction() {
+        guard Date() >= suppressAutomaticExpansionUntil else { return }
+        isExpanded = true
     }
 
     func setVolumeInteraction(active: Bool) {
@@ -12455,7 +14240,15 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 activeMode = .agent
             }
         case .general:
-            break
+            if bundleIdentifier == "com.apple.Music" {
+                if activeMode != .music {
+                    activeMode = .music
+                }
+                if contextChanged || appNameChanged {
+                    isUsingAppleMusic = true
+                    refreshAppleMusicNowPlaying(force: true)
+                }
+            }
         }
     }
 
@@ -12705,7 +14498,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     private func refreshExternalTaskStates(force: Bool) {
         guard isProActive else { return }
         let now = Date()
-        guard force || now.timeIntervalSince(lastExternalTaskRefreshDate) >= 0.75 else { return }
+        guard force || now.timeIntervalSince(lastExternalTaskRefreshDate) >= 2.5 else { return }
         guard !isRefreshingExternalTaskStates else { return }
         lastExternalTaskRefreshDate = now
         isRefreshingExternalTaskStates = true
@@ -12747,16 +14540,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     private func presentTaskCompletionNotice(for state: ExternalTaskState) {
         guard isProActive else { return }
-        if taskCompletionNotice != nil {
-            let identity = "\(state.source.rawValue):\(state.sessionID):\(state.updatedAt.timeIntervalSince1970)"
-            let isAlreadyQueued = pendingTaskCompletionStates.contains {
-                "\($0.source.rawValue):\($0.sessionID):\($0.updatedAt.timeIntervalSince1970)" == identity
-            }
-            if !isAlreadyQueued {
-                pendingTaskCompletionStates.append(state)
-            }
-            return
-        }
+        // Only keep the latest completion toast — do not queue multiple (blocks music UI).
+        pendingTaskCompletionStates.removeAll()
         let notice = TaskCompletionNotice(
             id: "\(state.source.rawValue):\(state.sessionID):\(state.updatedAt.timeIntervalSince1970)",
             source: state.source,
@@ -12766,7 +14551,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         taskCompletionDismissWorkItem?.cancel()
         taskCompletionNotice = notice
         let presentedAsFullScreenToast = requestTaskCompletionPresentation?() ?? false
-        isExpanded = !presentedAsFullScreenToast
+        // Never expand from completion notices during Space settle / auto-suppress windows.
+        if presentedAsFullScreenToast {
+            isExpanded = false
+        } else if Date() >= suppressAutomaticExpansionUntil {
+            isExpanded = true
+        }
         if !presentedAsFullScreenToast {
             let sourceName = state.source.shortBrandName
             let completionMessages = [
@@ -12780,25 +14570,30 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
         NSSound(named: NSSound.Name("Glass"))?.play()
 
-        if !presentedAsFullScreenToast {
-            let workItem = DispatchWorkItem { [weak self] in
-                guard let self, self.taskCompletionNotice?.id == notice.id else { return }
-                self.dismissTaskCompletionNotice()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.taskCompletionNotice?.id == notice.id else { return }
+            if presentedAsFullScreenToast {
+                self.requestExpandedPanelDismissal?()
             }
-            taskCompletionDismissWorkItem = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: workItem)
+            self.dismissTaskCompletionNotice()
         }
+        taskCompletionDismissWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4, execute: workItem)
     }
 
     func dismissTaskCompletionNotice() {
         taskCompletionDismissWorkItem?.cancel()
         taskCompletionDismissWorkItem = nil
+        pendingTaskCompletionStates.removeAll()
         taskCompletionNotice = nil
         isExpanded = false
-        if !pendingTaskCompletionStates.isEmpty {
-            let nextState = pendingTaskCompletionStates.removeFirst()
-            presentTaskCompletionNotice(for: nextState)
-        }
+    }
+
+    /// Clear completion overlay immediately when the user uses music controls.
+    func dismissTaskCompletionNoticeForInteraction() {
+        guard taskCompletionNotice != nil || !pendingTaskCompletionStates.isEmpty else { return }
+        dismissTaskCompletionNotice()
+        requestExpandedPanelDismissal?()
     }
 
     func presentCursorCompletionTestNotice() {
@@ -12878,9 +14673,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         endCodexTokenAutoExpansion()
         activeMode = .agent
         refreshAgentKeyStatus()
-        if !isProActive {
-            presentProUpgradePrompt(feature: "Agent")
-        }
     }
 
     func refreshAgentKeyStatus() {
@@ -12949,13 +14741,17 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             requestMicrophoneAccess()
         case .notDetermined:
             agentStatus = "需要语音权限"
+            agentResponse = "即将请求语音识别权限，请在弹窗中点「好」。"
             VoiceWhisperPermissionBroker.requestSpeechAuthorization { [weak self] status in
                 DispatchQueue.main.async { [weak self] in
                     self?.handleSpeechAuthorization(status)
                 }
             }
         case .denied, .restricted:
-            finishVoiceWhisperWithPermissionError(status: "语音识别未授权")
+            finishVoiceWhisperWithPermissionError(
+                status: "语音识别未授权",
+                openPrivacyPane: .speechRecognition
+            )
         @unknown default:
             isVoiceWhisperRecording = false
             agentStatus = "语音识别不可用"
@@ -12967,7 +14763,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         if status == .authorized {
             requestMicrophoneAccess()
         } else {
-            finishVoiceWhisperWithPermissionError(status: "语音识别未授权")
+            finishVoiceWhisperWithPermissionError(
+                status: "语音识别未授权",
+                openPrivacyPane: .speechRecognition
+            )
         }
     }
 
@@ -12977,28 +14776,73 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             startVoiceWhisperAudio()
         case .notDetermined:
             agentStatus = "需要麦克风权限"
+            agentResponse = "即将请求麦克风权限，请在弹窗中点「好」。"
             VoiceWhisperPermissionBroker.requestMicrophoneAccess { [weak self] granted in
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     if granted {
                         self.startVoiceWhisperAudio()
                     } else {
-                        self.finishVoiceWhisperWithPermissionError(status: "麦克风未授权")
+                        self.finishVoiceWhisperWithPermissionError(
+                            status: "麦克风未授权",
+                            openPrivacyPane: .microphone
+                        )
                     }
                 }
             }
         case .denied, .restricted:
-            finishVoiceWhisperWithPermissionError(status: "麦克风未授权")
+            finishVoiceWhisperWithPermissionError(
+                status: "麦克风未授权",
+                openPrivacyPane: .microphone
+            )
         @unknown default:
             finishVoiceWhisperWithPermissionError(status: "麦克风不可用")
         }
     }
 
-    private func finishVoiceWhisperWithPermissionError(status: String) {
+    private enum VoicePrivacyPane {
+        case microphone
+        case speechRecognition
+    }
+
+    private func finishVoiceWhisperWithPermissionError(
+        status: String,
+        openPrivacyPane: VoicePrivacyPane? = nil
+    ) {
         stopVoiceWhisperAudio()
         isVoiceWhisperRecording = false
         agentStatus = status
-        agentResponse = "请在“系统设置 → 隐私与安全性”中允许语音识别和麦克风权限，然后重试。"
+        switch openPrivacyPane {
+        case .microphone:
+            agentResponse = "请在「系统设置 → 隐私与安全性 → 麦克风」中打开 luma bar，然后重试 Voice Whisper。"
+            Self.openSystemPrivacySettings(pane: .microphone)
+        case .speechRecognition:
+            agentResponse = "请在「系统设置 → 隐私与安全性 → 语音识别」中打开 luma bar，然后重试 Voice Whisper。"
+            Self.openSystemPrivacySettings(pane: .speechRecognition)
+        case nil:
+            agentResponse = "请在「系统设置 → 隐私与安全性」中允许麦克风和语音识别，然后重试。"
+        }
+    }
+
+    private static func openSystemPrivacySettings(pane: VoicePrivacyPane) {
+        let candidates: [String]
+        switch pane {
+        case .microphone:
+            candidates = [
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+                "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Microphone"
+            ]
+        case .speechRecognition:
+            candidates = [
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition",
+                "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_SpeechRecognition"
+            ]
+        }
+        for candidate in candidates {
+            if let url = URL(string: candidate), NSWorkspace.shared.open(url) {
+                return
+            }
+        }
     }
 
     private func startVoiceWhisperAudio() {
@@ -13297,10 +15141,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     func submitAgentPrompt() {
-        guard isProActive else {
-            presentProUpgradePrompt(feature: "Agent")
-            return
-        }
         let prompt = agentInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return }
         isSelectionTranslationActive = false
@@ -13828,7 +15668,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                     Convert the user's macOS request into exactly one JSON object and nothing else.
                     Allowed actions:
                     music_next, music_previous, music_toggle,
-                    music_play_query (query required; player may be netease, spotify, apple_music, or local),
+                    music_play_query (query required; player may be netease, spotify, or local),
                     volume_set (value 0...1), volume_change (value -1...1),
                     brightness_up, brightness_down,
                     wifi_set (enabled required), appearance_set (enabled=true means dark mode),
@@ -14273,77 +16113,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             return
         }
 
-        if normalizedPlayer == "apple_music" {
-            playAppleMusicQuery(cleanedQuery)
-            return
-        }
-
         searchAndPlayNetEaseMusic(query: cleanedQuery)
     }
-
-    private func playAppleMusicQuery(_ query: String) {
-#if LUMA_APP_STORE
-        completeAgentLocalResponse(status: "Apple Music", response: "Apple Music 自动化在 Mac App Store 版不可用。")
-        return
-#else
-        agentTask?.cancel()
-        isAgentStreaming = true
-        agentStatus = "Apple Music"
-        agentResponse = "正在 Apple Music 中查找 \(query)…"
-        agentTask = Task { [weak self, query] in
-            let result = await Task.detached(priority: .userInitiated) {
-                let script = """
-                on run argv
-                    set searchText to item 1 of argv
-                    tell application "Music"
-                        activate
-                        set matches to search library playlist 1 for searchText
-                        if (count of matches) is 0 then error "No matching song"
-                        play item 1 of matches
-                        return name of item 1 of matches
-                    end tell
-                end run
-                """
-                let process = Process()
-                let outputPipe = Pipe()
-                let errorPipe = Pipe()
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-                process.arguments = ["-e", script, query]
-                process.standardOutput = outputPipe
-                process.standardError = errorPipe
-                do {
-                    try process.run()
-                    process.waitUntilExit()
-                    let output = String(
-                        decoding: outputPipe.fileHandleForReading.readDataToEndOfFile(),
-                        as: UTF8.self
-                    ).trimmingCharacters(in: .whitespacesAndNewlines)
-                    if process.terminationStatus == 0 {
-                        return Result<String, Error>.success(output)
-                    }
-                    let error = String(
-                        decoding: errorPipe.fileHandleForReading.readDataToEndOfFile(),
-                        as: UTF8.self
-                    ).trimmingCharacters(in: .whitespacesAndNewlines)
-                    return .failure(OpenAIClientError.api(error))
-                } catch {
-                    return .failure(error)
-                }
-            }.value
-            guard let self else { return }
-            self.isAgentStreaming = false
-            switch result {
-            case .success(let title):
-                self.completeAgentLocalResponse(
-                    status: "Apple Music",
-                    response: "正在 Apple Music 播放 \(title.isEmpty ? query : title)。"
-                )
-            case .failure(let error):
-                self.completeAgentLocalResponse(status: "Music error", response: error.localizedDescription)
-            }
-        }
-    #endif
-}
 
     private func sendBrightnessKey(up: Bool) {
 #if LUMA_APP_STORE
@@ -15049,6 +16820,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         .first
     }
 
+
     func openNetEaseCloudMusic() {
         preserveExpandedPanelForNetEaseActivation()
         NetEaseBridge.shared.openApplication(activates: true)
@@ -15084,11 +16856,16 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     func browseNetEasePlaylist(_ playlist: NetEasePlaylist) {
         guard netEasePlaylists.contains(where: { $0.id == playlist.id }) else { return }
-        guard selectedNetEasePlaylistID != playlist.id else { return }
+        let sameSelection = selectedNetEasePlaylistID == playlist.id
+        if sameSelection, !selectedNetEasePlaylistTracks.isEmpty {
+            return
+        }
 
         selectedNetEasePlaylistID = playlist.id
-        selectedNetEasePlaylistTracks = []
-        currentIndex = 0
+        if !sameSelection {
+            selectedNetEasePlaylistTracks = []
+            currentIndex = 0
+        }
         scanMessage = "Loading \(playlist.name)"
         loadNetEasePlaylistTracks(playlist)
     }
@@ -15144,7 +16921,13 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     private func playDirectTrack(_ track: LocalTrack) {
         guard track.playbackSource == .direct else { return }
-        isUsingNetEase = false
+        activateExclusivePlayback(source: .local)
+        appleMusicNowPlaying = nil
+        resolvedAppleMusicTrack = nil
+        currentAppleMusicTrackIdentity = ""
+        appleMusicLyricsFinishedIdentity = ""
+        appleMusicLyricsTask?.cancel()
+        pendingAppleMusicSeek = nil
         netEaseNowPlaying = nil
         resolvedNetEaseTrack = nil
         pendingNetEaseSeek = nil
@@ -15152,51 +16935,70 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         isPlaying = audioPlayer?.play() ?? false
         if !isPlaying {
             scanMessage = "Cannot play \(track.title)"
+        } else {
+            syncMusicLibrarySourceToActivePlayback(force: true)
         }
     }
 
     private func playNetEaseTrack(_ track: LocalTrack) {
-        audioPlayer?.pause()
-        audioPlayer = nil
-        isPlaying = false
-        position = 0
-        duration = 0
-        netEaseNowPlaying = NetEaseNowPlaying(
-            title: track.title,
-            artist: track.displayArtist,
-            album: track.album,
-            artworkData: track.artworkData,
-            position: 0,
-            duration: 0,
-            isPlaying: true
-        )
-        isUsingNetEase = true
-        scanMessage = "Opening in NetEase Cloud Music"
-        preserveExpandedPanelForNetEaseActivation()
-        switch track.playbackSource {
-        case .netEaseSong(let songID):
-            seedResolvedNetEaseTrack(
-                track,
-                songID: songID,
-                identity: Self.netEaseTrackIdentity(
-                    title: track.title,
-                    artist: track.displayArtist,
-                    album: track.album
-                )
+        ensureSinglePlayerPlaying(target: .netEase) {
+            self.audioPlayer = nil
+            self.isPlaying = false
+            self.position = 0
+            self.duration = 0
+            self.appleMusicNowPlaying = nil
+            self.resolvedAppleMusicTrack = nil
+            self.currentAppleMusicTrackIdentity = ""
+            self.appleMusicLyricsFinishedIdentity = ""
+            self.appleMusicLyricsTask?.cancel()
+            self.pendingAppleMusicSeek = nil
+            self.netEaseNowPlaying = NetEaseNowPlaying(
+                title: track.title,
+                artist: track.displayArtist,
+                album: track.album,
+                artworkData: track.artworkData,
+                position: 0,
+                duration: 0,
+                isPlaying: true
             )
-            NetEaseBridge.shared.openSong(id: songID)
-        case .netEase:
-            NetEaseBridge.shared.openTrack(track.url)
-        case .direct:
-            return
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-            self?.refreshNetEaseNowPlaying(force: true)
+            self.isUsingNetEase = true
+            self.syncMusicLibrarySourceToActivePlayback(force: true)
+            self.scanMessage = "Opening in NetEase Cloud Music"
+            self.preserveExpandedPanelForNetEaseActivation()
+            switch track.playbackSource {
+            case .netEaseSong(let songID):
+                self.seedResolvedNetEaseTrack(
+                    track,
+                    songID: songID,
+                    identity: Self.netEaseTrackIdentity(
+                        title: track.title,
+                        artist: track.displayArtist,
+                        album: track.album
+                    )
+                )
+                NetEaseBridge.shared.openSong(id: songID)
+            case .netEase:
+                NetEaseBridge.shared.openTrack(track.url)
+            case .direct, .appleMusic:
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                self?.refreshNetEaseNowPlaying(force: true)
+            }
         }
     }
 
     private func sendNetEaseCommand(_ command: NetEaseRemoteCommand) {
-        if NetEaseBridge.shared.send(command) {
+        let ok: Bool
+        switch command {
+        case .play:
+            ok = NetEaseBridge.shared.playNetEaseOnly()
+        case .pause:
+            ok = NetEaseBridge.shared.pauseNetEaseOnly()
+        default:
+            ok = NetEaseBridge.shared.send(command)
+        }
+        if ok {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 self?.refreshNetEaseNowPlaying(force: true)
             }
@@ -15217,16 +17019,46 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     @objc private func timerFired(_ timer: Timer) {
         let tickDate = Date()
-        if isUsingNetEase,
-           let netEaseNowPlaying,
-           netEaseNowPlaying.isPlaying
-        {
-            let elapsed = min(0.5, max(0, tickDate.timeIntervalSince(lastNetEasePositionTickDate)))
-            self.netEaseNowPlaying = netEaseNowPlaying.with(
-                position: min(netEaseNowPlaying.duration, netEaseNowPlaying.position + elapsed)
-            )
+
+        // While scrubbing, never push live playhead / play-state into the UI.
+        if !isSeekingPlayback {
+            // Apple Music: publish timestamp-interpolated playhead (~10 Hz) without += drift.
+            // Force isPlaying from verified Music.app playerState every tick.
+            if isDisplayingAppleMusicNowPlaying || isUsingAppleMusic || musicLibrarySource == .appleMusic {
+                if let track = AppleMusicService.shared.publishInterpolatedPosition(at: tickDate) {
+                    let playing = AppleMusicService.shared.playerState == .playing
+                    if appleMusicNowPlaying?.position != track.position
+                        || appleMusicNowPlaying?.isPlaying != playing
+                        || appleMusicNowPlaying?.title != track.title
+                    {
+                        var synced = track
+                        synced.isPlaying = playing
+                        appleMusicNowPlaying = synced
+                    } else if playing {
+                        // Ensure SwiftUI progress/lyrics observers refresh even when Equatable skips.
+                        objectWillChange.send()
+                    }
+                }
+            }
+
+            // NetEase: same timestamp clock — do not accumulate elapsed ticks.
+            if isDisplayingNetEaseNowPlaying || isUsingNetEase,
+               let netEaseNowPlaying
+            {
+                let live = netEaseProgressClock.calculatedCurrentTime(at: tickDate)
+                if abs(live - netEaseNowPlaying.position) > 0.008 {
+                    self.netEaseNowPlaying = netEaseNowPlaying.with(position: live)
+                } else if netEaseProgressClock.isPlaying {
+                    objectWillChange.send()
+                }
+            }
+
+            if !isUsingNetEase, !isUsingAppleMusic, let audioPlayer {
+                position = audioPlayer.currentTime
+                duration = audioPlayer.duration
+                isPlaying = audioPlayer.isPlaying
+            }
         }
-        lastNetEasePositionTickDate = tickDate
 
         if tickDate.timeIntervalSince(lastApplicationContextRefreshDate) >= 0.5 {
             lastApplicationContextRefreshDate = tickDate
@@ -15235,18 +17067,16 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
         refreshExternalTaskStates(force: false)
         refreshSystemMetrics(force: false)
-        refreshNetEaseNowPlaying(force: false)
+        if !isSeekingPlayback {
+            refreshNetEaseNowPlaying(force: false)
+            refreshAppleMusicNowPlaying(force: false)
+        }
         updateDesktopPetMood(now: tickDate)
         refreshPetWeatherIfNeeded(now: tickDate)
         updateProactiveDesktopPet(now: tickDate)
 
-        if !isUsingNetEase, let audioPlayer {
-            position = audioPlayer.currentTime
-            duration = audioPlayer.duration
-            isPlaying = audioPlayer.isPlaying
-        }
-
         syncSystemVolumeIfNeeded()
+        reconcileExclusiveAudioFocus()
     }
 
     private func refreshNetEaseNowPlaying(force: Bool) {
@@ -15271,6 +17101,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             netEaseLyricsTask?.cancel()
             netEaseArtworkTask?.cancel()
             pendingNetEaseSeek = nil
+            netEaseProgressClock.reset()
             return
         }
 
@@ -15295,18 +17126,335 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             }
         }
 
-        netEaseNowPlaying = nowPlaying
-        lastNetEasePositionTickDate = Date()
-        refreshResolvedNetEaseDetails(for: nowPlaying)
-        let localPlayerIsActive = audioPlayer?.isPlaying == true
-
-        if isUsingNetEase || nowPlaying.isPlaying || !localPlayerIsActive {
-            if localPlayerIsActive {
-                audioPlayer?.pause()
-                isPlaying = false
+        let forceCalibrate = pendingNetEaseSeek != nil
+            || (!currentNetEaseTrackIdentity.isEmpty && incomingIdentity != currentNetEaseTrackIdentity)
+        if isSeekingPlayback {
+            if var existing = netEaseNowPlaying,
+               Self.netEaseTrackIdentity(
+                title: existing.title,
+                artist: existing.artist,
+                album: existing.album
+               ) == incomingIdentity
+            {
+                let duration = max(existing.duration, nowPlaying.duration)
+                existing = NetEaseNowPlaying(
+                    title: nowPlaying.title,
+                    artist: nowPlaying.artist,
+                    album: nowPlaying.album,
+                    artworkData: nowPlaying.artworkData ?? existing.artworkData,
+                    position: duration * seekPreviewProgress,
+                    duration: duration,
+                    isPlaying: seekLockedIsPlaying ?? existing.isPlaying
+                )
+                netEaseNowPlaying = existing
+                refreshResolvedNetEaseDetails(for: existing)
             }
-            isUsingNetEase = true
+            return
         }
+        netEaseProgressClock.calibrate(
+            systemPosition: nowPlaying.position,
+            duration: nowPlaying.duration,
+            isPlaying: nowPlaying.isPlaying,
+            trackIdentity: incomingIdentity,
+            force: forceCalibrate
+        )
+        nowPlaying = nowPlaying.with(position: netEaseProgressClock.calculatedCurrentTime())
+        netEaseNowPlaying = nowPlaying
+        refreshResolvedNetEaseDetails(for: nowPlaying)
+
+        // Never steal exclusive ownership from Apple Music / local island sessions.
+        if activeMusicSource == .appleMusic || isUsingAppleMusic {
+            return
+        }
+        if activeMusicSource == .local, audioPlayer?.isPlaying == true {
+            return
+        }
+
+        let localPlayerIsActive = audioPlayer?.isPlaying == true
+        let shouldClaimNetEase = isUsingNetEase
+            || activeMusicSource == .netEase
+            || (nowPlaying.isPlaying && musicLibrarySource == .netEase)
+            || (nowPlaying.isPlaying && !isUsingAppleMusic && musicLibrarySource != .appleMusic)
+
+        guard shouldClaimNetEase else { return }
+
+        if localPlayerIsActive {
+            audioPlayer?.pause()
+            isPlaying = false
+        }
+        if (appleMusicNowPlaying?.isPlaying == true) || AppleMusicService.shared.isPlaying {
+            pauseAppleMusicPlaybackEngine()
+        }
+        isUsingNetEase = true
+        isUsingAppleMusic = false
+        activeMusicSource = .netEase
+        syncMusicLibrarySourceToActivePlayback()
+        reconcileExclusiveAudioFocus()
+    }
+
+    private var lastAppleMusicRefreshDate = Date.distantPast
+
+    private func refreshAppleMusicNowPlaying(force: Bool) {
+        guard force
+            || musicLibrarySource == .appleMusic
+            || isUsingAppleMusic
+            || isAppleMusicContext
+        else {
+            return
+        }
+        let now = Date()
+        // Keep polling while paused too — otherwise Play/Pause icon can stick after
+        // an optimistic toggle that Music.app did not actually honor.
+        let interval: TimeInterval =
+            (AppleMusicService.shared.playerState == .playing) ? 0.65 : 1.0
+        guard force || now.timeIntervalSince(lastAppleMusicRefreshDate) >= interval else { return }
+        lastAppleMusicRefreshDate = now
+        AppleMusicService.shared.refresh { [weak self] in
+            self?.applyAppleMusicNowPlaying(AppleMusicService.shared.currentTrack)
+        }
+    }
+
+    private func applyAppleMusicNowPlaying(_ nowPlaying: MusicNowPlayingInfo?) {
+        guard var nowPlaying else {
+            if isUsingAppleMusic || musicLibrarySource == .appleMusic {
+                appleMusicNowPlaying = nil
+                resolvedAppleMusicTrack = nil
+                currentAppleMusicTrackIdentity = ""
+                appleMusicLyricsFinishedIdentity = ""
+                appleMusicLyricsTask?.cancel()
+                appleMusicLyricsTask = nil
+                pendingAppleMusicSeek = nil
+                if musicLibrarySource != .appleMusic {
+                    isUsingAppleMusic = false
+                }
+            }
+            return
+        }
+
+        let incomingIdentity = Self.appleMusicTrackIdentity(
+            title: nowPlaying.title,
+            artist: nowPlaying.artist,
+            album: nowPlaying.album
+        )
+        if !currentAppleMusicTrackIdentity.isEmpty,
+           incomingIdentity != currentAppleMusicTrackIdentity
+        {
+            pendingAppleMusicSeek = nil
+        }
+
+        if let pendingSeek = pendingAppleMusicSeek {
+            if Date() >= pendingSeek.expiresAt {
+                pendingAppleMusicSeek = nil
+            } else if abs(nowPlaying.position - pendingSeek.position) <= 1.25 {
+                pendingAppleMusicSeek = nil
+            } else {
+                nowPlaying = nowPlaying.with(position: pendingSeek.position)
+            }
+        }
+
+        // Belt-and-suspenders: never let a paused zero overwrite a valid local position.
+        if !nowPlaying.isPlaying,
+           nowPlaying.position <= 0.05,
+           let existing = appleMusicNowPlaying,
+           Self.appleMusicTrackIdentity(
+            title: existing.title,
+            artist: existing.artist,
+            album: existing.album
+           ) == incomingIdentity,
+           existing.position > 0.05
+        {
+            nowPlaying.position = existing.position
+        }
+
+        if isSeekingPlayback {
+            // Scrub lock: keep preview position + frozen play state; allow artwork/title refresh only.
+            if var existing = appleMusicNowPlaying,
+               Self.appleMusicTrackIdentity(
+                title: existing.title,
+                artist: existing.artist,
+                album: existing.album
+               ) == incomingIdentity
+            {
+                if let artwork = nowPlaying.artworkData {
+                    existing.artworkData = artwork
+                }
+                existing.title = nowPlaying.title
+                existing.artist = nowPlaying.artist
+                existing.album = nowPlaying.album
+                if nowPlaying.duration > 1 {
+                    existing.duration = nowPlaying.duration
+                }
+                existing.position = max(0, existing.duration * seekPreviewProgress)
+                if let seekLockedIsPlaying {
+                    existing.isPlaying = seekLockedIsPlaying
+                }
+                appleMusicNowPlaying = existing
+                refreshResolvedAppleMusicDetails(for: existing)
+            }
+            return
+        }
+
+        // Service already calibrated its clock; mirror the interpolated playhead into UI state.
+        nowPlaying.position = AppleMusicService.shared.playbackTime
+        nowPlaying.isPlaying = AppleMusicService.shared.playerState == .playing
+        appleMusicNowPlaying = nowPlaying
+        refreshResolvedAppleMusicDetails(for: nowPlaying)
+
+        // Never steal exclusive ownership from NetEase / local island sessions.
+        if activeMusicSource == .netEase || isUsingNetEase {
+            return
+        }
+        if activeMusicSource == .local, audioPlayer?.isPlaying == true {
+            return
+        }
+
+        let localPlayerIsActive = audioPlayer?.isPlaying == true
+        let shouldClaimAppleMusic = isUsingAppleMusic
+            || activeMusicSource == .appleMusic
+            || musicLibrarySource == .appleMusic
+            || (nowPlaying.isPlaying && !isUsingNetEase && musicLibrarySource != .netEase)
+
+        guard shouldClaimAppleMusic else { return }
+
+        if localPlayerIsActive {
+            audioPlayer?.pause()
+            isPlaying = false
+        }
+        if netEaseNowPlaying?.isPlaying == true {
+            pauseNetEasePlaybackEngine()
+        }
+        isUsingAppleMusic = true
+        isUsingNetEase = false
+        activeMusicSource = .appleMusic
+        syncMusicLibrarySourceToActivePlayback()
+        reconcileExclusiveAudioFocus()
+    }
+
+    private func refreshResolvedAppleMusicDetails(for nowPlaying: MusicNowPlayingInfo) {
+        let identity = Self.appleMusicTrackIdentity(
+            title: nowPlaying.title,
+            artist: nowPlaying.artist,
+            album: nowPlaying.album
+        )
+
+        if identity != currentAppleMusicTrackIdentity {
+            currentAppleMusicTrackIdentity = identity
+            appleMusicLyricsFinishedIdentity = ""
+            appleMusicLyricsTask?.cancel()
+            resolvedAppleMusicTrack = makeAppleMusicTrack(
+                from: nowPlaying,
+                lyrics: "",
+                timedLyrics: []
+            )
+            loadAppleMusicLyrics(for: nowPlaying, identity: identity)
+            return
+        }
+
+        guard let resolved = resolvedAppleMusicTrack else {
+            resolvedAppleMusicTrack = makeAppleMusicTrack(
+                from: nowPlaying,
+                lyrics: "",
+                timedLyrics: []
+            )
+            loadAppleMusicLyrics(for: nowPlaying, identity: identity)
+            return
+        }
+
+        if resolved.artworkData == nil, let artwork = nowPlaying.artworkData {
+            print("[AppleMusic] ViewModel syncing artwork into resolved track (\(artwork.count) bytes)")
+            resolvedAppleMusicTrack = LocalTrack(
+                id: resolved.id,
+                url: resolved.url,
+                title: resolved.title,
+                artist: resolved.artist,
+                album: resolved.album,
+                artworkData: artwork,
+                lyrics: resolved.lyrics,
+                timedLyrics: resolved.timedLyrics,
+                playbackSource: .appleMusic
+            )
+        }
+
+        if !resolved.hasLyrics, appleMusicLyricsFinishedIdentity != identity {
+            loadAppleMusicLyrics(for: nowPlaying, identity: identity)
+        }
+    }
+
+    private func makeAppleMusicTrack(
+        from nowPlaying: MusicNowPlayingInfo,
+        lyrics: String,
+        timedLyrics: [TimedLyricLine]
+    ) -> LocalTrack {
+        let identity = Self.appleMusicTrackIdentity(
+            title: nowPlaying.title,
+            artist: nowPlaying.artist,
+            album: nowPlaying.album
+        )
+        let id = URL(string: "apple-music://track/\(identity.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "current")")
+            ?? URL(fileURLWithPath: "/apple-music/\(identity)")
+        return LocalTrack(
+            id: id,
+            url: id,
+            title: nowPlaying.title,
+            artist: nowPlaying.artist,
+            album: nowPlaying.album,
+            artworkData: nowPlaying.artworkData,
+            lyrics: lyrics,
+            timedLyrics: timedLyrics,
+            playbackSource: .appleMusic
+        )
+    }
+
+    private func loadAppleMusicLyrics(for nowPlaying: MusicNowPlayingInfo, identity: String) {
+        guard appleMusicLyricsFinishedIdentity != identity else { return }
+        appleMusicLyricsTask?.cancel()
+        let title = nowPlaying.title
+        let artist = nowPlaying.artist
+        let album = nowPlaying.album
+        let duration = nowPlaying.duration
+
+        print("[AppleMusic] ViewModel requesting lyrics for \(artist) - \(title)")
+
+        appleMusicLyricsTask = Task { [weak self] in
+            let raw = await AppleMusicService.fetchLyrics(
+                title: title,
+                artist: artist,
+                album: album,
+                duration: duration
+            )
+            guard !Task.isCancelled, let self else { return }
+            let lyricResult = raw.flatMap(Self.parseLyrics(from:))
+            await MainActor.run {
+                guard self.currentAppleMusicTrackIdentity == identity else { return }
+                self.appleMusicLyricsFinishedIdentity = identity
+                var base = self.appleMusicNowPlaying ?? nowPlaying
+                // Keep any artwork that arrived while lyrics were downloading.
+                if base.artworkData == nil {
+                    base.artworkData = self.resolvedAppleMusicTrack?.artworkData ?? nowPlaying.artworkData
+                }
+                if let lyricResult {
+                    print("[AppleMusic] ViewModel applied lyrics (\(lyricResult.timedLines.count) timed lines)")
+                    self.resolvedAppleMusicTrack = self.makeAppleMusicTrack(
+                        from: base,
+                        lyrics: lyricResult.text,
+                        timedLyrics: lyricResult.timedLines
+                    )
+                } else {
+                    print("[AppleMusic] ViewModel lyrics empty after network lookup")
+                    self.resolvedAppleMusicTrack = self.makeAppleMusicTrack(
+                        from: base,
+                        lyrics: "",
+                        timedLyrics: []
+                    )
+                }
+            }
+        }
+    }
+
+    nonisolated private static func appleMusicTrackIdentity(title: String, artist: String, album: String) -> String {
+        [title, artist, album]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .joined(separator: "|")
     }
 
     private func syncSystemVolumeIfNeeded() {
@@ -15770,6 +17918,7 @@ private struct CompactBarShape: InsettableShape {
 }
 
 
+/// FROZEN UI (2026-08-03) — do not restyle. See `.cursor/rules/liquid-glass-ui-frozen.mdc`.
 /// visionOS Glass Material tokens — aligned with Apple visionOS Figma Community kit:
 /// ultra-thin vibrancy, dual inner shadows, and a 0.5–1pt rim light.
 private enum LiquidGlassPaint {
@@ -15786,9 +17935,9 @@ private enum LiquidGlassPaint {
         case .compact:
             return isHovering ? 0.20 : 0.15
         case .panel, .overlay:
-            return 0.03
+            return 0.0
         case .card:
-            return isSelected ? 0.10 : 0.04
+            return isSelected ? 0.08 : 0.03
         case .control:
             return isSelected ? 0.24 : 0.16
         }
@@ -15855,16 +18004,10 @@ private struct LiquidGlassInnerShadows<S: Shape>: View {
                         .blur(radius: 3.5)
                 }
             case .panel, .overlay:
-                // Expanded sheet: barely-there depth so wallpaper stays readable.
-                ZStack {
-                    shape
-                        .stroke(Color.white.opacity(0.06), lineWidth: 2)
-                        .blur(radius: 1)
-                    shape
-                        .stroke(Color.black.opacity(0.06), lineWidth: 8)
-                        .offset(y: 1)
-                        .blur(radius: 8)
-                }
+                // Edge catch only — no dark/gray fill into the sheet.
+                shape
+                    .stroke(Color.white.opacity(0.14), lineWidth: 2)
+                    .blur(radius: 1)
             case .card:
                 // Content wells only need a soft inner catch — not full glass depth.
                 shape
@@ -15877,16 +18020,28 @@ private struct LiquidGlassInnerShadows<S: Shape>: View {
     }
 }
 
-/// Shared Liquid Glass surface: `.ultraThinMaterial` + wash + dual inner shadows + rim light.
-/// Compact keeps the denser “jewel” look; panel/overlay use a clearer floating sheet.
+/// Shared Liquid Glass surface: hardcoded translucent layer fill
+/// + wash + dual inner shadows + rim light. No NSVisualEffectView / SwiftUI materials.
 private struct LiquidGlassSurface<S: InsettableShape>: View {
     let shape: S
     var role: LiquidGlassPaint.Role = .panel
     var isHovering: Bool = false
     var isSelected: Bool = false
     var selectedAccent: Color? = nil
+    var cornerRadius: CGFloat = 16
+    @Environment(\.islandTheme) private var theme
 
     private var emphasized: Bool { isHovering || isSelected }
+    private var resolvedCornerRadius: CGFloat {
+        switch role {
+        case .compact, .control:
+            return max(cornerRadius, NotchMetrics.compactHeight / 2)
+        case .panel, .overlay:
+            return theme.expandedCornerRadius
+        case .card:
+            return theme.cardCornerRadius
+        }
+    }
 
     var body: some View {
         Group {
@@ -15901,88 +18056,79 @@ private struct LiquidGlassSurface<S: InsettableShape>: View {
         }
     }
 
-    /// Compact bar / small controls — denser recipe the user already likes.
+    /// Compact bar / small controls — denser glass (no SwiftUI material; those freeze after Spaces).
     private var compactBody: some View {
         ZStack {
-            shape.fill(.ultraThinMaterial)
-
-            shape.fill(
-                Color.white.opacity(
-                    LiquidGlassPaint.washOpacity(
-                        role: role,
-                        isHovering: isHovering,
-                        isSelected: isSelected
-                    )
-                )
-            )
-
-            if isSelected, let selectedAccent {
-                shape.fill(selectedAccent.opacity(0.14))
-            }
-
-            LiquidGlassInnerShadows(shape: shape, role: role)
-
-            shape.fill(
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(emphasized ? 0.20 : 0.12),
-                        Color.white.opacity(0.03),
-                        .clear
-                    ],
-                    startPoint: .top,
-                    endPoint: UnitPoint(x: 0.5, y: 0.45)
-                )
-            )
-
-            shape.strokeBorder(
-                LiquidGlassPaint.rimGradient(emphasized: emphasized, role: role),
-                lineWidth: LiquidGlassPaint.rimWidth(emphasized: emphasized, role: role)
-            )
-        }
-        .compositingGroup()
-        .clipShape(shape)
-    }
-
-    /// Expanded island / overlays — true behind-window glass so wallpaper shows through.
-    private var panelBody: some View {
-        ZStack {
-            // Sample the desktop directly. ultraThinMaterial alone frosts too hard
-            // on a large panel and hides the wallpaper.
+            // Do NOT SwiftUI-clip the effect view — that freezes blur into solid gray/black.
             VisualEffectBackground(
                 material: .hudWindow,
                 blendingMode: .behindWindow,
-                isEmphasized: false
+                isEmphasized: true,
+                cornerRadius: resolvedCornerRadius
             )
-            .clipShape(shape)
 
-            // Barely-there glass wash — keep content readable without milking the view.
-            shape.fill(Color.white.opacity(0.035))
-
-            LiquidGlassInnerShadows(shape: shape, role: role)
-
-            // Soft top catch only — no heavy specular slab.
-            shape.fill(
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.08),
-                        .clear
-                    ],
-                    startPoint: .top,
-                    endPoint: UnitPoint(x: 0.5, y: 0.22)
+            ZStack {
+                shape.fill(
+                    Color.white.opacity(
+                        LiquidGlassPaint.washOpacity(
+                            role: role,
+                            isHovering: isHovering,
+                            isSelected: isSelected
+                        )
+                    )
                 )
-            )
 
-            // Rim Light — keeps the sheet edge without filling the center.
-            shape.strokeBorder(
-                LiquidGlassPaint.rimGradient(emphasized: true, role: role),
-                lineWidth: 1.0
-            )
+                if isSelected, let selectedAccent {
+                    shape.fill(selectedAccent.opacity(0.14))
+                }
 
-            shape
-                .inset(by: 1.25)
-                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                LiquidGlassInnerShadows(shape: shape, role: role)
+
+                shape.fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(emphasized ? 0.20 : 0.12),
+                            Color.white.opacity(0.03),
+                            .clear
+                        ],
+                        startPoint: .top,
+                        endPoint: UnitPoint(x: 0.5, y: 0.45)
+                    )
+                )
+
+                shape.strokeBorder(
+                    LiquidGlassPaint.rimGradient(emphasized: emphasized, role: role),
+                    lineWidth: LiquidGlassPaint.rimWidth(emphasized: emphasized, role: role)
+                )
+            }
+            .allowsHitTesting(false)
         }
-        .clipShape(shape)
+    }
+
+    /// Expanded island — thin clear glass. No milk/blue veil; wallpaper stays visible.
+    private var panelBody: some View {
+        ZStack {
+            VisualEffectBackground(
+                material: .hudWindow,
+                blendingMode: .behindWindow,
+                isEmphasized: false,
+                cornerRadius: resolvedCornerRadius
+            )
+
+            ZStack {
+                LiquidGlassInnerShadows(shape: shape, role: role)
+
+                shape.strokeBorder(
+                    LiquidGlassPaint.rimGradient(emphasized: true, role: role),
+                    lineWidth: 1.0
+                )
+
+                shape
+                    .inset(by: 1.25)
+                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.5)
+            }
+            .allowsHitTesting(false)
+        }
     }
 
     /// Interior wells on glass — frosted chips, never nested ultraThinMaterial.
@@ -16052,8 +18198,11 @@ private struct CompactBarBackground: View {
                     .frame(height: 1)
                     .clipShape(shape)
             case .pixelCat:
-                VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
-                    .clipShape(shape)
+                VisualEffectBackground(
+                    material: .popover,
+                    blendingMode: .behindWindow,
+                    cornerRadius: NotchMetrics.compactHeight / 2
+                )
                 shape.fill(
                     LinearGradient(
                         colors: [
@@ -16116,13 +18265,30 @@ private struct CompactBarBackground: View {
             case .liquidGlass:
                 LiquidGlassSurface(shape: shape, role: .compact, isHovering: isHovering)
             case .bar:
-                VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow)
-                    .clipShape(shape)
+                VisualEffectBackground(
+                    material: .hudWindow,
+                    blendingMode: .behindWindow,
+                    cornerRadius: NotchMetrics.compactHeight / 2
+                )
                 shape.fill(NotchPaint.surface)
                 shape.strokeBorder(NotchPaint.edge(isHovering: isHovering), lineWidth: 1)
             }
         }
-        .clipShape(shape)
+        // Never clip liquid/bar glass with SwiftUI clipShape — it freezes blur solid.
+        .modifier(CompactBarClipIfNeeded(theme: theme, shape: shape))
+    }
+}
+
+private struct CompactBarClipIfNeeded<S: Shape>: ViewModifier {
+    let theme: IslandTheme
+    let shape: S
+
+    func body(content: Content) -> some View {
+        if theme.usesBackdropMaterial {
+            content
+        } else {
+            content.clipShape(shape)
+        }
     }
 }
 
@@ -16163,8 +18329,11 @@ private struct ExpandedIslandBackground: View {
                     .padding(.horizontal, 9)
                     .padding(.top, 5)
             case .pixelCat:
-                VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
-                    .clipShape(shape)
+                VisualEffectBackground(
+                    material: .popover,
+                    blendingMode: .behindWindow,
+                    cornerRadius: theme.expandedCornerRadius
+                )
                 shape.fill(
                     LinearGradient(
                         colors: [
@@ -16227,13 +18396,16 @@ private struct ExpandedIslandBackground: View {
             case .liquidGlass:
                 LiquidGlassSurface(shape: shape, role: .panel)
             case .bar:
-                VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow)
-                    .clipShape(shape)
+                VisualEffectBackground(
+                    material: .hudWindow,
+                    blendingMode: .behindWindow,
+                    cornerRadius: theme.expandedCornerRadius
+                )
                 shape.fill(NotchPaint.panel)
                 shape.strokeBorder(.white.opacity(0.07), lineWidth: 1)
             }
         }
-        .clipShape(shape)
+        .modifier(CompactBarClipIfNeeded(theme: theme, shape: shape))
     }
 }
 
@@ -16985,6 +19157,10 @@ struct CompactLeftView: View {
             Button("Open NetEase Cloud Music") {
                 model.openNetEaseCloudMusic()
             }
+            Button("Open Apple Music") {
+                AppleMusicService.shared.openApplication(activates: true)
+                model.setMusicLibrarySource(.appleMusic)
+            }
             Button("Refresh NetEase Playlists") {
                 model.refreshNetEasePlaylists()
             }
@@ -17140,6 +19316,10 @@ struct CompactRightView: View {
             }
             Button("Open NetEase Cloud Music") {
                 model.openNetEaseCloudMusic()
+            }
+            Button("Open Apple Music") {
+                AppleMusicService.shared.openApplication(activates: true)
+                model.setMusicLibrarySource(.appleMusic)
             }
             Button("Refresh NetEase Playlists") {
                 model.refreshNetEasePlaylists()
@@ -17555,7 +19735,8 @@ struct NetEasePlaylistShelf: View {
                                 playlist: playlist,
                                 isSelected: model.selectedNetEasePlaylistID == playlist.id
                             ) {
-                                model.playNetEasePlaylist(playlist)
+                                // Browse/load tracks in-panel; don't open NetEase (focus steal blocks selecting songs).
+                                model.browseNetEasePlaylist(playlist)
                             }
                             .id(playlist.id)
                         }
@@ -17571,7 +19752,7 @@ struct NetEasePlaylistShelf: View {
                     model.browseAdjacentNetEasePlaylist(offset: 1)
                 }
             }
-            .frame(height: 48)
+            .frame(height: 40)
             .background {
                 PlaylistSwipeMonitor { offset in
                     model.browseAdjacentNetEasePlaylist(offset: offset)
@@ -17625,7 +19806,7 @@ struct NetEasePlaylistShelf: View {
     }
 
     private func selectInitialNetEasePlaylistIfNeeded() {
-        guard model.isNetEaseContext,
+        guard model.musicLibrarySource == .netEase,
               model.selectedNetEasePlaylistID == nil,
               let firstPlaylist = model.netEasePlaylists.first
         else {
@@ -17789,7 +19970,7 @@ private final class NativeMusicSeekBarView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         guard duration > 0 else { return }
-        window?.makeFirstResponder(self)
+        // Do not steal key focus — activating the panel mid-scrub can make Music report paused.
         isTrackingSeek = true
         updateProgress(with: event, commit: false)
     }
@@ -17957,8 +20138,10 @@ private final class NativeMusicSeekBarView: NSView {
 private struct MusicSeekBar: NSViewRepresentable {
     let progress: Double
     let duration: TimeInterval
-    @Binding var seekProgress: Double
-    @Binding var isSeeking: Bool
+    /// ViewModel scrub lock — when true, ignore live `progress` from timers.
+    let isSeeking: Bool
+    let previewProgress: Double
+    let onPreview: (Double) -> Void
     let onCommit: (Double) -> Void
     @Environment(\.islandTheme) private var theme
 
@@ -17969,16 +20152,15 @@ private struct MusicSeekBar: NSViewRepresentable {
     func updateNSView(_ view: NativeMusicSeekBarView, context: Context) {
         view.theme = theme
         view.duration = duration
-        view.applyExternalProgress(isSeeking ? seekProgress : progress)
+        // Prefer the scrub preview whenever either AppKit tracking or ViewModel lock is active.
+        let displayProgress = (isSeeking || view.isTrackingSeek) ? previewProgress : progress
+        view.applyExternalProgress(displayProgress)
         view.alphaValue = duration > 0 ? 1 : 0.38
         view.onPreview = { value in
-            seekProgress = value
-            isSeeking = true
+            onPreview(value)
         }
         view.onCommit = { value in
-            seekProgress = value
             onCommit(value)
-            isSeeking = false
         }
     }
 }
@@ -19608,8 +21790,8 @@ struct AgentDashboardView: View {
             }
             .frame(
                 maxWidth: .infinity,
-                minHeight: theme.isAdventureX ? 82 : 70,
-                maxHeight: theme.isAdventureX ? 96 : 88
+                minHeight: theme.isAdventureX ? 64 : 56,
+                maxHeight: theme.isAdventureX ? 78 : 72
             )
             .background {
                 if theme.isAdventureX {
@@ -19820,7 +22002,6 @@ struct AgentDashboardView: View {
             }
         }
         .onAppear {
-            model.showAgent()
             focusedField = model.agentShowsAPIKeySetup && !model.agentHasAPIKey ? .apiKey : .message
         }
         .onChange(of: model.agentFocusRequestID) { _, _ in
@@ -19870,51 +22051,47 @@ struct AgentDashboardView: View {
 
 struct MusicExpandedView: View {
     @ObservedObject var model: MusicPlayerModel
-    @State private var seekProgress = 0.0
-    @State private var isSeeking = false
     @Environment(\.islandTheme) private var theme
 
     var body: some View {
-        let previewPosition = isSeeking
-            ? model.displayedDuration * seekProgress
-            : model.displayedPosition
+        let previewPosition = model.displayedPosition
 
-        VStack(spacing: 11) {
-            HStack(spacing: 10) {
+        VStack(spacing: 7) {
+            HStack(spacing: 8) {
                 ZStack {
                     if model.activeMode == .system {
                         SystemGlyphBadge(metrics: model.systemMetrics)
-                            .frame(width: 46, height: 46)
+                            .frame(width: 32, height: 32)
                     } else if model.activeMode == .token {
                         TokenGlyphBadge(progress: model.agentTokenProgress)
-                            .frame(width: 46, height: 46)
+                            .frame(width: 32, height: 32)
                     } else if model.activeMode == .agent {
                         AgentGlyphBadge(isActive: model.isAgentStreaming)
-                            .frame(width: 46, height: 46)
+                            .frame(width: 32, height: 32)
                     } else {
                         AlbumBadge(
                             artworkData: model.displayedArtworkData,
                             isPlaying: model.displayedIsPlaying
                         )
-                            .frame(width: 46, height: 46)
+                            .frame(width: 32, height: 32)
                     }
                 }
-                .frame(width: 46, height: 46)
+                .frame(width: 32, height: 32)
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(model.activeDisplayTitle)
-                        .font(theme.font(size: 15, weight: .bold))
+                        .font(theme.font(size: 13, weight: .bold))
                         .foregroundStyle(theme.foreground())
                         .lineLimit(1)
                     Text(model.activeDisplaySubtitle)
-                        .font(theme.font(size: 11, weight: .medium))
+                        .font(theme.font(size: 10, weight: .medium))
                         .foregroundStyle(theme.mutedForeground(opacity: 0.94))
                         .lineLimit(1)
                 }
 
-                Spacer()
+                Spacer(minLength: 6)
 
-                HStack(spacing: 6) {
+                HStack(spacing: NotchMetrics.expandedModePillSpacing) {
                     modePill(title: "Music", icon: "music.note", active: model.activeMode == .music) {
                         model.showMusic()
                     }
@@ -19930,9 +22107,12 @@ struct MusicExpandedView: View {
                     model.dismissExpandedPanel()
                 } label: {
                     Image(systemName: "chevron.up")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(theme.foreground(opacity: 0.85))
-                        .frame(width: 34, height: 34)
+                        .frame(
+                            width: NotchMetrics.expandedCollapseButton,
+                            height: NotchMetrics.expandedCollapseButton
+                        )
                         .background(
                             RoundedRectangle(cornerRadius: theme.controlCornerRadius, style: .continuous)
                                 .fill(theme.controlFill)
@@ -19941,6 +22121,7 @@ struct MusicExpandedView: View {
                 .buttonStyle(.plain)
                 .help("Collapse")
             }
+            .frame(height: NotchMetrics.expandedHeaderRowHeight)
 
             if model.activeMode == .system {
                 ScrollView(showsIndicators: false) {
@@ -19951,20 +22132,53 @@ struct MusicExpandedView: View {
             } else if model.activeMode == .agent {
                 AgentDashboardView(model: model)
             } else {
-                if model.isNetEaseContext {
-                    NetEasePlaylistShelf(model: model)
+                HStack(spacing: 6) {
+                    ForEach(IslandMusicLibrarySource.allCases) { source in
+                        musicSourcePill(source)
+                    }
+                    Spacer(minLength: 0)
                 }
 
-                VStack(spacing: 5) {
+                if model.musicLibrarySource == .netEase {
+                    NetEasePlaylistShelf(model: model)
+                } else if model.musicLibrarySource == .appleMusic {
+                    HStack(spacing: 8) {
+                        Image(systemName: "music.note.list")
+                            .font(.system(size: 11, weight: .bold))
+                        Text(model.appleMusicNowPlaying == nil
+                             ? "打开 Music.app 开始播放"
+                             : "Apple Music · \(model.displayedTitle)")
+                            .font(theme.font(size: 11, weight: .semibold))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Button("打开 Music") {
+                            AppleMusicService.shared.openApplication(activates: true)
+                        }
+                        .buttonStyle(.plain)
+                        .font(theme.font(size: 10, weight: .semibold))
+                        .foregroundStyle(theme.primaryAccent)
+                    }
+                    .foregroundStyle(theme.mutedForeground(opacity: 0.9))
+                    .padding(.horizontal, 10)
+                    .frame(height: 36)
+                }
+
+                VStack(spacing: 4) {
                     MusicSeekBar(
                         progress: model.displayedProgress,
                         duration: model.displayedDuration,
-                        seekProgress: $seekProgress,
-                        isSeeking: $isSeeking
-                    ) { progress in
-                        model.seek(to: progress)
-                    }
-                    .frame(height: 18)
+                        isSeeking: model.isSeekingPlayback,
+                        previewProgress: model.isSeekingPlayback
+                            ? model.seekPreviewProgress
+                            : model.displayedProgress,
+                        onPreview: { progress in
+                            model.beginSeekPreview(progress: progress)
+                        },
+                        onCommit: { progress in
+                            model.commitSeek(progress: progress)
+                        }
+                    )
+                    .frame(height: 16)
                     .help(model.displayedDuration > 0 ? "Seek" : "No timeline available")
 
                     HStack {
@@ -19976,96 +22190,82 @@ struct MusicExpandedView: View {
                     .foregroundStyle(theme.mutedForeground(opacity: 0.84))
                 }
 
-                HStack(spacing: 12) {
-                    PlayerCircleButton(systemName: "backward.fill") {
-                        model.previousTrack()
-                    }
-
-                    Button {
-                        model.togglePlayback()
-                    } label: {
-                        Image(systemName: model.displayedIsPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 16, weight: .black))
-                            .foregroundStyle(theme.accentForeground)
-                            .frame(width: 46, height: 46)
-                            .background(
-                                RoundedRectangle(cornerRadius: theme.controlCornerRadius, style: .continuous)
-                                    .fill(theme.isPixelStyled || theme.isLight ? theme.primaryAccent : Color.white)
-                            )
-                    }
-                    .buttonStyle(.plain)
-
-                    PlayerCircleButton(systemName: "forward.fill") {
-                        model.nextTrack()
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "speaker.wave.2.fill")
-                        .foregroundStyle(theme.mutedForeground(opacity: 0.94))
-                    Slider(
-                        value: $model.volume,
-                        in: 0...1,
-                        onEditingChanged: { isEditing in
-                            model.setVolumeInteraction(active: isEditing)
+                ZStack {
+                    HStack(spacing: 12) {
+                        PlayerCircleButton(systemName: "backward.fill") {
+                            model.previousTrack()
                         }
-                    )
+
+                        Button {
+                            model.togglePlayback()
+                        } label: {
+                            Image(systemName: model.displayedIsPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 14, weight: .black))
+                                .foregroundStyle(theme.accentForeground)
+                                .frame(width: 36, height: 36)
+                                .background(
+                                    RoundedRectangle(cornerRadius: theme.controlCornerRadius, style: .continuous)
+                                        .fill(theme.isPixelStyled || theme.isLight ? theme.primaryAccent : Color.white)
+                                )
+                        }
+                        .buttonStyle(.plain)
+
+                        PlayerCircleButton(systemName: "forward.fill") {
+                            model.nextTrack()
+                        }
+                    }
+
+                    HStack(spacing: 6) {
+                        Spacer(minLength: 0)
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(theme.mutedForeground(opacity: 0.94))
+                        Slider(
+                            value: $model.volume,
+                            in: 0...1,
+                            onEditingChanged: { isEditing in
+                                model.setVolumeInteraction(active: isEditing)
+                            }
+                        )
                         .tint(theme.isLight ? theme.primaryAccent : Color.white.opacity(0.82))
-                        .frame(width: 112)
+                        .frame(width: 78)
+                    }
                 }
+                .frame(height: 36)
 
                 Divider()
                     .overlay(theme.separatorColor)
 
-                HStack(alignment: .top, spacing: 10) {
-                    LyricsPane(track: model.displayedLyricsTrack, position: model.displayedPosition)
-                        .frame(width: 198)
+                HStack(alignment: .top, spacing: 8) {
+                    LyricsPane(
+                        track: model.displayedLyricsTrack,
+                        position: model.displayedPosition
+                    )
+                    .frame(width: 148)
 
-                    VStack(spacing: 6) {
-                        if !model.isNetEaseContext {
-                            NetEasePlaylistShelf(model: model)
-                        }
-
-                        ScrollView {
-                            LazyVStack(spacing: 6) {
-                                if model.displayedTrackList.isEmpty {
-                                    Text(model.displayedTrackListMessage)
-                                        .font(theme.font(size: 12, weight: .semibold))
-                                        .foregroundStyle(theme.mutedForeground(opacity: 0.94))
-                                        .frame(maxWidth: .infinity, minHeight: 60)
-                                } else {
-                                    ForEach(model.displayedTrackList) { track in
-                                        let isCurrentTrack = model.isCurrentDisplayTrack(track)
-                                        TrackRow(
-                                            track: track,
-                                            isCurrent: isCurrentTrack,
-                                            isPlaying: model.displayedIsPlaying && isCurrentTrack
-                                        ) {
-                                            model.play(track: track)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    trackListScroll
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
-                .frame(minHeight: 92)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
-        .padding(14)
+        .padding(NotchMetrics.expandedHeaderPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
             ExpandedIslandBackground()
         }
-        .clipShape(
-            ThemeRectShape(
-                radius: theme.expandedCornerRadius,
-                chamfer: 0
+        .modifier(
+            CompactBarClipIfNeeded(
+                theme: theme,
+                shape: ThemeRectShape(
+                    radius: theme.expandedCornerRadius,
+                    chamfer: 0
+                )
             )
         )
         .shadow(
             color: theme == .liquidGlass
-                ? Color.black.opacity(0.12)
+                ? Color.black.opacity(0.05)
                 : (theme.isAdventureX
                 ? Color(red: 0.31, green: 0.33, blue: 0.28).opacity(0.72)
                 : (theme.isLight
@@ -20076,11 +22276,11 @@ struct MusicExpandedView: View {
                     ? .black.opacity(0.38)
                     : (theme.isPixelStyled ? .black.opacity(0.72) : .black.opacity(0.26)))))),
             radius: theme == .liquidGlass
-                ? 24
+                ? 16
                 : (theme.isPixelCat ? 14 : (theme.isPixelStyled ? 0 : 12)),
             x: theme.isEightBit ? 4 : 0,
             y: theme == .liquidGlass
-                ? 10
+                ? 6
                 : (theme.isAdventureX ? 7 : (theme.isEightBit ? 4 : (theme.isPixelCat ? 8 : 7)))
         )
         .animation(.spring(response: 0.24, dampingFraction: 0.9), value: model.activeMode)
@@ -20091,6 +22291,10 @@ struct MusicExpandedView: View {
             }
             Button("Open NetEase Cloud Music") {
                 model.openNetEaseCloudMusic()
+            }
+            Button("Open Apple Music") {
+                AppleMusicService.shared.openApplication(activates: true)
+                model.setMusicLibrarySource(.appleMusic)
             }
             Button("Refresh NetEase Playlists") {
                 model.refreshNetEasePlaylists()
@@ -20112,53 +22316,110 @@ struct MusicExpandedView: View {
         }
     }
 
-    private func modePill(title: String, icon: String, active: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 9, weight: .bold))
-                Text(title)
-                    .font(theme.font(size: 10, weight: .semibold))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(
-                theme == .liquidGlass
-                    ? (active ? Color.black.opacity(0.78) : theme.foreground(opacity: 0.78))
-                    : (active ? theme.accentForeground : theme.foreground(opacity: 0.74))
-            )
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background {
-                let pill = RoundedRectangle(cornerRadius: theme.controlCornerRadius, style: .continuous)
-                if theme == .liquidGlass {
-                    // Frosted chips on the sheet — not nested ultraThinMaterial.
-                    pill
-                        .fill(active ? Color.white.opacity(0.88) : Color.white.opacity(0.10))
-                        .overlay {
-                            pill.strokeBorder(
-                                Color.white.opacity(active ? 0.72 : 0.28),
-                                lineWidth: 0.5
-                            )
-                        }
-                } else {
-                    pill
+    private func musicSourcePill(_ source: IslandMusicLibrarySource) -> some View {
+        let active = model.musicLibrarySource == source
+        return Button {
+            model.setMusicLibrarySource(source)
+        } label: {
+            Text(source.title)
+                .font(theme.font(size: 10, weight: .semibold))
+                .foregroundStyle(
+                    active
+                        ? (theme.isLight || theme == .liquidGlass ? theme.accentForeground : Color.black.opacity(0.82))
+                        : theme.mutedForeground(opacity: 0.92)
+                )
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background {
+                    RoundedRectangle(cornerRadius: theme.controlCornerRadius, style: .continuous)
                         .fill(
                             active
-                                ? (theme.isPixelStyled || theme.isLight ? theme.primaryAccent : Color.white.opacity(0.92))
+                                ? (theme.isPixelStyled || theme.isLight || theme == .liquidGlass
+                                    ? theme.primaryAccent.opacity(theme == .liquidGlass ? 0.92 : 1)
+                                    : Color.white.opacity(0.92))
                                 : theme.controlFill
                         )
-                        .overlay {
-                            if theme.isPixelStyled || theme.isLight {
-                                pill.stroke(
-                                    active ? theme.primaryAccent : theme.pixelBorder.opacity(0.28),
-                                    lineWidth: 1
-                                )
-                            }
-                        }
                 }
-            }
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Keep pill hit targets stable when the playlist shelf mounts/unmounts under them.
+        .zIndex(2)
+    }
+
+    @ViewBuilder
+    private var trackListScroll: some View {
+        ScrollView(showsIndicators: false) {
+            LazyVStack(spacing: 4) {
+                if model.displayedTrackList.isEmpty {
+                    Text(model.displayedTrackListMessage)
+                        .font(theme.font(size: 12, weight: .semibold))
+                        .foregroundStyle(theme.mutedForeground(opacity: 0.94))
+                        .frame(maxWidth: .infinity, minHeight: 60)
+                } else {
+                    ForEach(model.displayedTrackList) { track in
+                        let isCurrentTrack = model.isCurrentDisplayTrack(track)
+                        TrackRow(
+                            track: track,
+                            isCurrent: isCurrentTrack,
+                            isPlaying: model.displayedIsPlaying && isCurrentTrack
+                        ) {
+                            model.play(track: track)
+                        }
+                    }
+                }
+            }
+            .padding(.trailing, 4)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func modePill(title: String, icon: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(
+                    theme == .liquidGlass
+                        ? (active ? Color.black.opacity(0.78) : theme.foreground(opacity: 0.78))
+                        : (active ? theme.accentForeground : theme.foreground(opacity: 0.74))
+                )
+                .frame(
+                    width: NotchMetrics.expandedModePillWidth,
+                    height: NotchMetrics.expandedHeaderRowHeight - 4
+                )
+                .background {
+                    let pill = RoundedRectangle(cornerRadius: theme.controlCornerRadius, style: .continuous)
+                    if theme == .liquidGlass {
+                        pill
+                            .fill(active ? Color.white.opacity(0.88) : Color.white.opacity(0.10))
+                            .overlay {
+                                pill.strokeBorder(
+                                    Color.white.opacity(active ? 0.72 : 0.28),
+                                    lineWidth: 0.5
+                                )
+                            }
+                    } else {
+                        pill
+                            .fill(
+                                active
+                                    ? (theme.isPixelStyled || theme.isLight ? theme.primaryAccent : Color.white.opacity(0.92))
+                                    : theme.controlFill
+                            )
+                            .overlay {
+                                if theme.isPixelStyled || theme.isLight {
+                                    pill.stroke(
+                                        active ? theme.primaryAccent : theme.pixelBorder.opacity(0.28),
+                                        lineWidth: 1
+                                    )
+                                }
+                            }
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(title)
+        .zIndex(2)
     }
 
     private func timeString(_ time: TimeInterval) -> String {
@@ -20218,28 +22479,50 @@ struct LyricsPane: View {
     let track: LocalTrack?
     let position: TimeInterval
     @Environment(\.islandTheme) private var theme
+    @State private var loadingTimedOut = false
 
     private var lyricsText: String {
         guard let track else { return "No track selected" }
         let trimmed = track.lyrics.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "No embedded lyrics" : trimmed
+        if !trimmed.isEmpty { return trimmed }
+        switch track.playbackSource {
+        case .netEaseSong:
+            // Once we have artwork/metadata, or loading timed out, stop infinite spinner copy.
+            if track.artworkData != nil || loadingTimedOut {
+                return "暂无歌词"
+            }
+            return "正在加载歌词…"
+        case .appleMusic:
+            // Artwork may arrive before lyrics — don't treat artwork as "lyrics finished".
+            if loadingTimedOut {
+                return "暂无歌词"
+            }
+            return "正在加载歌词…"
+        case .netEase, .direct:
+            return "No embedded lyrics"
+        }
     }
 
-    private var currentLineTime: TimeInterval? {
+    private var currentLyricIndex: Int? {
         guard let timedLyrics = track?.timedLyrics, !timedLyrics.isEmpty else { return nil }
-        let leadPosition = position + 0.18
-        return timedLyrics.last { $0.time <= leadPosition }?.time
+        // Hold the current line until the next line's timestamp begins —
+        // no lead-in offset (that caused premature advances).
+        let currentTime = position
+        for index in timedLyrics.indices {
+            let start = timedLyrics[index].time
+            let end = index + 1 < timedLyrics.count
+                ? timedLyrics[index + 1].time
+                : TimeInterval.infinity
+            if currentTime >= start && currentTime < end {
+                return index
+            }
+        }
+        return nil
     }
 
     private var currentLineID: Int? {
-        guard
-            let currentLineTime,
-            let timedLyrics = track?.timedLyrics
-        else {
-            return nil
-        }
-
-        return timedLyrics.first { abs($0.time - currentLineTime) < 0.001 }?.id
+        guard let currentLyricIndex, let timedLyrics = track?.timedLyrics else { return nil }
+        return timedLyrics[currentLyricIndex].id
     }
 
     var body: some View {
@@ -20249,15 +22532,16 @@ struct LyricsPane: View {
                     .font(.system(size: 10, weight: .bold))
                 Text("Lyrics")
                     .font(theme.font(size: 10, weight: .bold))
+                Spacer(minLength: 0)
             }
             .foregroundStyle(theme.mutedForeground(opacity: 0.9))
 
             ScrollViewReader { proxy in
-                ScrollView {
+                ScrollView(showsIndicators: false) {
                     if let timedLyrics = track?.timedLyrics, !timedLyrics.isEmpty {
                         LazyVStack(alignment: .leading, spacing: 6) {
-                            ForEach(timedLyrics) { line in
-                                let isCurrent = currentLineTime.map { abs(line.time - $0) < 0.001 } ?? false
+                            ForEach(Array(timedLyrics.enumerated()), id: \.element.id) { index, line in
+                                let isCurrent = currentLyricIndex == index
 
                                 Text(line.text)
                                     .font(theme.font(size: isCurrent ? 12.8 : 11.2, weight: isCurrent ? .bold : .medium))
@@ -20268,6 +22552,7 @@ struct LyricsPane: View {
                             }
                         }
                         .padding(.vertical, 32)
+                        .padding(.trailing, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         Text(lyricsText)
@@ -20275,6 +22560,7 @@ struct LyricsPane: View {
                             .foregroundStyle(track?.hasLyrics == true ? theme.foreground(opacity: 0.76) : theme.mutedForeground(opacity: 0.82))
                             .lineSpacing(3)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.trailing, 8)
                             .textSelection(.enabled)
                     }
                 }
@@ -20292,6 +22578,17 @@ struct LyricsPane: View {
                     guard newLineID != nil else { return }
                     followCurrentLine(with: proxy, animated: true)
                 }
+            }
+        }
+        .task(id: track?.id) {
+            loadingTimedOut = false
+            guard track?.hasLyrics != true else { return }
+            let timeoutNs: UInt64 = track?.playbackSource == .appleMusic
+                ? 10_000_000_000
+                : 4_000_000_000
+            try? await Task.sleep(nanoseconds: timeoutNs)
+            if track?.hasLyrics != true {
+                loadingTimedOut = true
             }
         }
         .padding(.horizontal, 10)

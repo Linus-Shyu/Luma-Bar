@@ -17,36 +17,36 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.2.1</string>
+	<string>0.2.2</string>
 	<key>CFBundleVersion</key>
-	<string>4</string>
+	<string>5</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 Luma Bar Core Team</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>luma bar uses automation only for Agent actions you request, such as reading the active browser tab or sending a confirmed message.</string>
-	<key>NSAppleMusicUsageDescription</key>
-	<string>luma bar scans and plays your local music library for the notch music controls.</string>
-	<key>NSContactsUsageDescription</key>
+<key>NSContactsUsageDescription</key>
 	<string>luma bar looks up a contact only when you ask the Agent to prepare a message to that person.</string>
 	<key>NSDesktopFolderUsageDescription</key>
-	<string>luma bar runs Agent shell commands that you explicitly confirm, including commands that may access Desktop files.</string>
+	<string>luma bar may access the Desktop only for files you select or Agent actions you confirm.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
-	<string>luma bar runs Agent shell commands that you explicitly confirm, including commands that may access Documents files.</string>
+	<string>luma bar may access Documents only for files you select or Agent actions you confirm.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
-	<string>luma bar runs Agent shell commands that you explicitly confirm, including commands that may access Downloads files.</string>
+	<string>luma bar may access Downloads only for files you select or Agent actions you confirm.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>luma bar records your voice only when you start Voice Whisper, then turns it into notes, commit messages, or shell commands.</string>
+	<string>luma bar 仅在你启动 Voice Whisper（语音输入）时使用麦克风，用于把说话内容转成文字。</string>
 	<key>NSNetworkVolumesUsageDescription</key>
-	<string>luma bar runs Agent shell commands that you explicitly confirm, including commands that may access network volumes.</string>
+	<string>luma bar may access network volumes only for files you select or Agent actions you confirm.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSRemovableVolumesUsageDescription</key>
-	<string>luma bar runs Agent shell commands that you explicitly confirm, including commands that may access removable volumes.</string>
+	<string>luma bar may access removable volumes only for files you select or Agent actions you confirm.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>luma bar captures the active game window only when you request screenshot analysis.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>luma bar uses speech recognition only when you start Voice Whisper.</string>
+	<string>luma bar 仅在你启动 Voice Whisper 时使用语音识别，用于把说话内容转成文字。</string>
 </dict>
 </plist>

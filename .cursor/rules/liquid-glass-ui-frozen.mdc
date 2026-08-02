@@ -1,0 +1,40 @@
+---
+description: FREEZE — Liquid Glass UI is final; never redesign or restyle it
+alwaysApply: true
+---
+
+# Liquid Glass UI is FROZEN (do not change)
+
+The user locked the **Liquid Glass** look as the perfect final state on 2026-08-03.
+
+## Hard ban
+
+Unless the user **explicitly** says to change Liquid Glass / island chrome / glass background, you must **NOT**:
+
+- Edit, refactor, restyle, “improve”, or “fix” any Liquid Glass visuals
+- Reintroduce `NSVisualEffectView`, SwiftUI materials (`.ultraThinMaterial`, etc.), or system blur
+- Change island window chrome transparency (`IslandPanel` opaque/clear/shadow/key behavior)
+- Change the fixed layer fill (`LockedClearBackgroundView` / `VisualEffectBackground`)
+- Tweak wash, rim, inner shadow, corner radius, opacity, colors, or layout of glass surfaces
+- Rewrite Space-transition glass cover behavior for aesthetic reasons
+
+## Locked symbols / regions (treat as read-only)
+
+In `Sources/LumaBar/main.swift` (and related theme code):
+
+- `IslandTheme.liquidGlass` appearance tokens (colors, radii, fonts tied to this theme)
+- `LiquidGlassPaint`, `LiquidGlassInnerShadows`, `LiquidGlassSurface`
+- Call sites that apply `LiquidGlassSurface` / glass fills on compact, panel, card, overlay, controls
+- `VisualEffectBackground`, `LockedClearBackgroundView`
+- `IslandPanel` transparency locks: `canBecomeKey` / `canBecomeMain` = false, clear/`isOpaque`/`hasShadow`, `lockTransparentRenderChrome`
+- Theme background branches that render liquid-glass overlays
+
+## Allowed work nearby
+
+You **may** change playback logic, NetEase/Apple Music exclusivity, seek, Agent, tokens, etc. — but keep diffs away from the frozen UI surfaces above.
+
+If a bug fix seems to require touching frozen UI, **stop and ask** the user first. Prefer the smallest non-visual workaround.
+
+## Default reply if asked to polish glass again
+
+Refuse redesign. Say Liquid Glass is frozen by user request, and only proceed if they explicitly unlock it.

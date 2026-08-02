@@ -83,10 +83,13 @@ chmod +x "$APP/Contents/MacOS/LumaBar"
 # Drop interrupted codesign leftovers that break subsequent signs.
 find "$APP" -name '*.cstemp' -delete 2>/dev/null || true
 echo "Signing with: $SIGN_IDENTITY"
+ENTITLEMENTS="$ROOT/Support/LumaBar.entitlements"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
   /usr/bin/codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
+elif [[ -f "$ENTITLEMENTS" ]]; then
+  # Hardened runtime + audio-input entitlement so macOS can prompt for Microphone.
+  /usr/bin/codesign --force --deep --options runtime --entitlements "$ENTITLEMENTS" --sign "$SIGN_IDENTITY" "$APP"
 else
-  # Hardened runtime keeps the same Team ID requirement that TCC keys off of.
   /usr/bin/codesign --force --deep --options runtime --sign "$SIGN_IDENTITY" "$APP"
 fi
 
