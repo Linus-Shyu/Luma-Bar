@@ -5924,6 +5924,12 @@ final class IslandPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
+    /// Never let WindowServer restore off-screen frame snapshots across Spaces (causes expand/pet flash).
+    override var isRestorable: Bool {
+        get { false }
+        set { super.isRestorable = false }
+    }
+
     /// Never allow AppKit to flip these panels opaque during drag / Space / edge crossing.
     override var isOpaque: Bool {
         get { false }
@@ -5952,6 +5958,9 @@ final class IslandPanel: NSPanel {
             backing: backingStoreType,
             defer: flag
         )
+        isRestorable = false
+        animationBehavior = .none
+        viewsNeedDisplay = true
         lockTransparentRenderChrome(stripFallbacks: true)
     }
 
@@ -5975,6 +5984,7 @@ final class IslandPanel: NSPanel {
         if isOpaque { super.isOpaque = false }
         if backgroundColor != .clear { super.backgroundColor = .clear }
         if hasShadow { super.hasShadow = false }
+        if isRestorable { super.isRestorable = false }
         if hidesOnDeactivate { hidesOnDeactivate = false }
         if animationBehavior != .none { animationBehavior = .none }
         if abs(alphaValue - 1) > 0.001 { super.alphaValue = 1 }
@@ -7067,6 +7077,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         let now = Date()
         // Already mid-transition (finger hovering between desktops): keep cover + extend watchdog.
         if isSpaceTransitionPending {
+            hardHideExpandedAndPetForSpaceTransition()
             setSpaceTransitionGlassCoverVisible(true)
             armSpaceTransitionWatchdog()
             return
@@ -7090,6 +7101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         isExpandedByBarHover = false
         suppressExpandedPanelUntil = now.addingTimeInterval(0.85)
         model.suppressAutomaticExpansion(for: 0.85)
+        // Kill expanded + pet paint immediately — before WindowServer Spaces snapshot.
+        hardHideExpandedAndPetForSpaceTransition()
 
         spaceTransitionOriginWasFullScreen = isHiddenForFullScreen
             || isFrontmostApplicationFullScreen()
@@ -7376,6 +7389,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         if !isSpaceTransitionPending {
             spaceTransitionOriginWasFullScreen = isHiddenForFullScreen
             isSpaceTransitionPending = true
+            hardHideExpandedAndPetForSpaceTransition()
             setSpaceTransitionGlassCoverVisible(true)
             armSpaceTransitionWatchdog()
             if !spaceTransitionOriginWasFullScreen {
@@ -7626,7 +7640,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         // If still collapsed, keep the expanded panel fully out of the window list.
         if !model.isExpanded {
             hideExpandedPanel(animated: false)
+            // Keep paint suppress until after restore settles — prevents 1-frame expand flash.
+            model.suppressTransientIslandSurfaces = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.isSpaceTransitionPending else { return }
+                // Only clear suppress when we are truly not mid-Space; pet may show again.
+                if !self.model.isExpanded {
+                    self.expandedWindow?.orderOut(nil)
+                }
+                self.model.suppressTransientIslandSurfaces = false
+                self.updateDesktopPetVisibility()
+            }
+        } else {
+            model.suppressTransientIslandSurfaces = false
         }
+    }
+
+    /// Order out expanded + pet and zero their opacity so Spaces snapshots cannot flash them.
+    private func hardHideExpandedAndPetForSpaceTransition() {
+        model.suppressTransientIslandSurfaces = true
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for window in [expandedWindow, desktopPetWindow, desktopPetBubbleWindow] {
+            guard let window else { continue }
+            window.animationBehavior = .none
+            window.isRestorable = false
+            window.alphaValue = 0
+            window.orderOut(nil)
+            window.contentView?.layer?.opacity = 0
+        }
+        CATransaction.commit()
     }
 
     private var hideSpaceTransitionGlassCoverWorkItem: DispatchWorkItem?
@@ -7650,8 +7693,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     private func spaceChromeWindows(includeExpanded: Bool) -> [IslandPanel] {
-        var windows = [cameraWindow, leftWindow, rightWindow, desktopPetWindow, desktopPetBubbleWindow]
+        var windows = [cameraWindow, leftWindow, rightWindow]
             .compactMap { $0 }
+        if !model.suppressTransientIslandSurfaces {
+            if let desktopPetWindow { windows.append(desktopPetWindow) }
+            if let desktopPetBubbleWindow { windows.append(desktopPetBubbleWindow) }
+        }
         if includeExpanded, let expandedWindow {
             windows.append(expandedWindow)
         }
@@ -7784,7 +7831,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
         // Honor existing expand state only — never flip isExpanded from Space / fullscreen restore.
         // (Hover, clicks, and explicit product actions are the only expand sources.)
-        if model.isExpanded {
+        if model.isExpanded, !model.suppressTransientIslandSurfaces {
             if wasHiddenForFullScreen || expandedWindow?.isVisible != true {
                 showExpandedPanel(animated: false)
             } else {
@@ -7813,8 +7860,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     private func refreshTranslucentSurfacesAfterSpaceChange(rebuildHosting: Bool = true) {
         resetSpaceTransitionVisualState()
 
-        let includeExpanded = model.isExpanded
+        let includeExpanded = model.isExpanded && !model.suppressTransientIslandSurfaces
         for window in spaceChromeWindows(includeExpanded: includeExpanded) {
+            // Never resurrect pet / bubble while Space suppress is active.
+            if model.suppressTransientIslandSurfaces,
+               window === desktopPetWindow || window === desktopPetBubbleWindow
+            {
+                window.alphaValue = 0
+                window.orderOut(nil)
+                continue
+            }
             window.animationBehavior = .none
             window.alphaValue = 1
             configureIslandWindowChrome(window, level: persistentIslandWindowLevel)
@@ -7988,8 +8043,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         expandedWindow?.immediateActionRect = expandedCollapseHitRect()
         expandedWindow?.immediateAction = .collapseExpanded
         expandedWindow?.actionHandler = self
+        // Collapsed by default — never leave an on-screen snapshot for Spaces to restore.
+        expandedWindow?.orderOut(nil)
 
         buildDesktopPetWindow()
+        desktopPetWindow?.orderOut(nil)
     }
 
     private func makePanel<Content: View>(
@@ -8008,6 +8066,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = false
+        panel.isRestorable = false
         panel.hidesOnDeactivate = false
         panel.isExcludedFromWindowsMenu = true
         panel.isMovableByWindowBackground = false
@@ -8042,6 +8101,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             }
         }
         .frame(width: expandedPanelSize.width, height: expandedPanelSize.height)
+        // Hard-kill paint while collapsed / Space-settling — WindowServer may briefly restore the panel.
+        .opacity(model.isExpanded && !model.suppressTransientIslandSurfaces ? 1 : 0)
+        .allowsHitTesting(model.isExpanded && !model.suppressTransientIslandSurfaces)
+        .clipped()
         .environment(\.islandTheme, model.theme)
         // Liquid Glass: don't force dark scheme — it milks the behind-window blur gray/white.
         .preferredColorScheme(model.theme == .liquidGlass ? nil : model.theme.preferredColorScheme)
@@ -8195,7 +8258,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     private func updateDesktopPetVisibility() {
-        if isSpaceTransitionPending {
+        if isSpaceTransitionPending || model.suppressTransientIslandSurfaces {
+            desktopPetBubbleDismissWorkItem?.cancel()
+            desktopPetBubbleWindow?.alphaValue = 0
+            desktopPetWindow?.alphaValue = 0
+            desktopPetBubbleWindow?.orderOut(nil)
+            desktopPetWindow?.orderOut(nil)
             return
         }
         if isHiddenForFullScreen || isFrontmostApplicationFullScreen() {
@@ -8213,6 +8281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         if desktopPetDragStartOrigin == nil {
             desktopPetWindow?.setFrame(desktopPetFrame(), display: true)
         }
+        desktopPetWindow?.contentView?.layer?.opacity = 1
         desktopPetWindow?.alphaValue = 1
         if desktopPetWindow?.isVisible != true {
             desktopPetWindow?.orderFrontRegardless()
@@ -8475,8 +8544,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
     private func showExpandedPanel(animated: Bool) {
         guard let expandedWindow else { return }
-        guard !isSpaceTransitionPending else {
+        guard !isSpaceTransitionPending, !model.suppressTransientIslandSurfaces else {
             expandedWindow.alphaValue = 0
+            expandedWindow.orderOut(nil)
             return
         }
         guard !isHiddenForFullScreen, !isFrontmostApplicationFullScreen() else {
@@ -10323,6 +10393,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     @Published var currentIndex = 0
     @Published var isPlaying = false
     @Published var isExpanded = false
+    /// When true, expanded panel + desktop pet must not paint (Space transition / settle).
+    /// WindowServer snapshot restore can briefly resurrect ordered-out windows — opacity kills that flash.
+    @Published var suppressTransientIslandSurfaces = false
     @Published private(set) var isCodexTokenAutoExpanded = false
     @Published fileprivate var taskCompletionNotice: TaskCompletionNotice?
     @Published var activeMode: IslandContentMode = .music
@@ -18899,6 +18972,10 @@ private struct PixelDesktopPetView: View {
             DesktopPetEmotionOverlay(mood: mood, theme: model.theme)
         }
         .frame(width: 88, height: 88)
+        // Hard-kill pet paint during Space settle / when theme hides companions.
+        .opacity(model.theme.showsDesktopPet && !model.suppressTransientIslandSurfaces ? 1 : 0)
+        .allowsHitTesting(model.theme.showsDesktopPet && !model.suppressTransientIslandSurfaces)
+        .clipped()
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
         .simultaneousGesture(
