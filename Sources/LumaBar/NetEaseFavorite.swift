@@ -41,6 +41,10 @@ enum NetEaseFavoriteController {
     }
 
     static func loadSessionCookies() -> SessionCookies? {
+#if LUMA_APP_STORE
+        // Sandbox: do not probe other apps' HTTPStorages / cookie jars.
+        return nil
+#else
         for bundleID in cookieBundleCandidates {
             let path = binaryCookiesURL(bundleID: bundleID)
             guard FileManager.default.fileExists(atPath: path.path),
@@ -52,6 +56,7 @@ enum NetEaseFavoriteController {
             return SessionCookies(musicU: musicU, csrf: cookies["__csrf"] ?? "")
         }
         return nil
+#endif
     }
 
     /// Add song to `playlistID`, or to「我喜欢的音乐」when `playlistID` is nil.

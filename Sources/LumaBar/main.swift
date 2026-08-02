@@ -24,70 +24,281 @@ import SwiftUI
 private let netEaseMusicBundleIdentifier = "com.netease.163music"
 private let appleMusicBundleIdentifier = "com.apple.Music"
 
-/// Bundle-ID targeted transport — never NX_KEYTYPE / global MediaRemote broadcasts.
+/// Bundle-ID targeted transport — never global NX_KEYTYPE broadcasts to whatever owns Now Playing.
 enum ExclusiveAudioFocus {
+    private static let scriptTimeoutSeconds = 1
+    /// Wall-clock cap for hung NetEase AppleEvent handlers after playlist switches.
+    private static let netEaseTier1WallTimeout: TimeInterval = 0.5
+
+    /// Run AppleScript; returns false on compile/runtime failure.
+    @discardableResult
+    nonisolated static func runAppleScript(_ source: String) -> Bool {
+        var error: NSDictionary?
+        guard let appleScript = NSAppleScript(source: source) else { return false }
+        _ = appleScript.executeAndReturnError(&error)
+        return error == nil
+    }
+
+    /// Run AppleScript but abandon the wait after `wallTimeout` if the AE handler is wedged.
+    @discardableResult
+    nonisolated static func runAppleScript(
+        _ source: String,
+        wallTimeout: TimeInterval
+    ) -> Bool {
+        let box = AppleScriptResultBox()
+        let semaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            box.success = runAppleScript(source)
+            semaphore.signal()
+        }
+        if semaphore.wait(timeout: .now() + wallTimeout) == .timedOut {
+            return false
+        }
+        return box.success
+    }
+
+    private final class AppleScriptResultBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _success = false
+        var success: Bool {
+            get {
+                lock.lock()
+                defer { lock.unlock() }
+                return _success
+            }
+            set {
+                lock.lock()
+                _success = newValue
+                lock.unlock()
+            }
+        }
+    }
+
     /// Synchronous AppleScript pause aimed at one app only.
     nonisolated static func pauseApplication(bundleIdentifier: String) {
         let script = """
         tell application id "\(bundleIdentifier)"
-          try
-            pause
-          end try
+          with timeout of \(scriptTimeoutSeconds) seconds
+            try
+              pause
+            end try
+          end timeout
         end tell
         """
-        var error: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&error)
+        _ = runAppleScript(script)
     }
 
     /// Synchronous AppleScript play aimed at one app only.
     nonisolated static func playApplication(bundleIdentifier: String) {
         let script = """
         tell application id "\(bundleIdentifier)"
-          try
-            play
-          end try
+          with timeout of \(scriptTimeoutSeconds) seconds
+            try
+              play
+            end try
+          end timeout
         end tell
         """
-        var error: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&error)
+        _ = runAppleScript(script)
     }
 
     /// Synchronous AppleScript playpause aimed at one app only.
     nonisolated static func playPauseApplication(bundleIdentifier: String) {
         let script = """
         tell application id "\(bundleIdentifier)"
-          try
-            playpause
-          end try
+          with timeout of \(scriptTimeoutSeconds) seconds
+            try
+              playpause
+            end try
+          end timeout
         end tell
         """
-        var error: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&error)
+        _ = runAppleScript(script)
     }
 
     nonisolated static func pauseAppleMusic() {
         pauseApplication(bundleIdentifier: appleMusicBundleIdentifier)
     }
 
-    nonisolated static func pauseNetEase() {
-        pauseApplication(bundleIdentifier: netEaseMusicBundleIdentifier)
-    }
-
     nonisolated static func playAppleMusic() {
+        // Prefer safe play — only when Music has a current track.
+        if AppleMusicService.playCurrentTrackIfAvailable() {
+            return
+        }
         playApplication(bundleIdentifier: appleMusicBundleIdentifier)
-    }
-
-    nonisolated static func playNetEase() {
-        playApplication(bundleIdentifier: netEaseMusicBundleIdentifier)
     }
 
     nonisolated static func playPauseAppleMusic() {
         playPauseApplication(bundleIdentifier: appleMusicBundleIdentifier)
     }
 
-    nonisolated static func playPauseNetEase() {
-        playPauseApplication(bundleIdentifier: netEaseMusicBundleIdentifier)
+    // MARK: - NetEase force transport (AppleScript → System Events Space)
+
+    /// Pause NetEase: one short AppleScript attempt, then optional Space.
+    /// - Important: Space **toggles**. If NetEase is already paused, Space would *resume* it
+    ///   (ghost play). Only allow Space when the caller believes NetEase is currently playing.
+    @discardableResult
+    nonisolated static func pauseNetEase(likelyPlaying: Bool = true) -> Bool {
+        if pauseNetEaseOnceViaAppleScript() {
+            return true
+        }
+        guard likelyPlaying else { return false }
+        return sendNetEaseSpaceKeyViaSystemEvents()
     }
+
+    /// Play NetEase: one AppleScript `play`, then Space (bring front) as last resort.
+    @discardableResult
+    nonisolated static func playNetEase() -> Bool {
+        if playNetEaseOnceViaAppleScript() {
+            return true
+        }
+        return sendNetEaseSpaceKeyViaSystemEvents(bringToFront: true)
+    }
+
+    /// Blocking exclusive handoff: silence every rival **before** the caller issues play.
+    /// Must run off the main thread. No delays — pause completes (or times out) then returns.
+    nonisolated static func silenceRivals(
+        of target: IslandMusicLibrarySource,
+        netEaseLikelyPlaying: Bool
+    ) {
+        switch target {
+        case .appleMusic:
+            pauseNetEase(likelyPlaying: netEaseLikelyPlaying)
+        case .netEase:
+            pauseAppleMusic()
+        case .local:
+            pauseAppleMusic()
+            pauseNetEase(likelyPlaying: netEaseLikelyPlaying)
+        }
+    }
+
+    @discardableResult
+    nonisolated static func playPauseNetEase() -> Bool {
+        // Avoid playpause dictionary — same server-side rejection as pause on some playlists.
+        sendNetEaseSpaceKeyViaSystemEvents()
+    }
+
+    /// Single AppleScript pause — on any error/timeout, caller must use Space (no second `pause`).
+    nonisolated private static func pauseNetEaseOnceViaAppleScript() -> Bool {
+        let script = """
+        try
+          with timeout of 0.5 seconds
+            tell application id "\(netEaseMusicBundleIdentifier)" to pause
+          end timeout
+          return "ok"
+        on error
+          error "netease-pause-unsupported"
+        end try
+        """
+        return runAppleScript(script, wallTimeout: netEaseTier1WallTimeout)
+    }
+
+    nonisolated private static func playNetEaseOnceViaAppleScript() -> Bool {
+        let script = """
+        try
+          with timeout of 0.5 seconds
+            tell application id "\(netEaseMusicBundleIdentifier)" to play
+          end timeout
+          return "ok"
+        on error
+          error "netease-play-unsupported"
+        end try
+        """
+        return runAppleScript(script, wallTimeout: netEaseTier1WallTimeout)
+    }
+
+    /// Physical Space into the NetEase process — bypasses broken AppleScript / remote-control handlers.
+    @discardableResult
+    nonisolated static func sendNetEaseSpaceKeyViaSystemEvents(bringToFront: Bool = false) -> Bool {
+        let apps = NSRunningApplication.runningApplications(
+            withBundleIdentifier: netEaseMusicBundleIdentifier
+        )
+        guard apps.contains(where: { !$0.isTerminated }) else {
+            return false
+        }
+
+        let frontLine = bringToFront ? "set frontmost to true" : ""
+        // key code 49 = Space. Prefer bundle-id process lookup; fall back to process names.
+        let script = """
+        try
+          with timeout of 1 seconds
+            tell application "System Events"
+              set procs to every process whose bundle identifier is "\(netEaseMusicBundleIdentifier)"
+              if (count of procs) > 0 then
+                tell item 1 of procs
+                  \(frontLine)
+                  key code 49
+                end tell
+                return "ok"
+              end if
+              if exists process "NetEaseMusic" then
+                tell process "NetEaseMusic"
+                  \(frontLine)
+                  key code 49
+                end tell
+                return "ok"
+              end if
+              if exists process "NeteaseMusic" then
+                tell process "NeteaseMusic"
+                  \(frontLine)
+                  key code 49
+                end tell
+                return "ok"
+              end if
+            end tell
+          end timeout
+        on error
+          error "space-key-failed"
+        end try
+        error "no-netease-process"
+        """
+        if runAppleScript(script, wallTimeout: 1.2) {
+            return true
+        }
+
+#if !LUMA_APP_STORE
+        let box = AppleScriptResultBox()
+        let semaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.main.async {
+            let previous = NSWorkspace.shared.frontmostApplication
+            if let app = NSRunningApplication.runningApplications(
+                withBundleIdentifier: netEaseMusicBundleIdentifier
+            ).first(where: { !$0.isTerminated }) {
+                _ = app.activate()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    box.success = postSpaceKeyCGEvent()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        if !bringToFront {
+                            _ = previous?.activate()
+                        }
+                        semaphore.signal()
+                    }
+                }
+            } else {
+                semaphore.signal()
+            }
+        }
+        _ = semaphore.wait(timeout: .now() + 1.2)
+        return box.success
+#else
+        return false
+#endif
+    }
+
+#if !LUMA_APP_STORE
+    nonisolated private static func postSpaceKeyCGEvent() -> Bool {
+        let spaceKey: CGKeyCode = 49 // kVK_Space
+        guard let source = CGEventSource(stateID: .combinedSessionState),
+              let keyDown = CGEvent(keyboardEventSource: source, virtualKey: spaceKey, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: spaceKey, keyDown: false)
+        else {
+            return false
+        }
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+        return true
+    }
+#endif
 }
 
 private enum NotchMetrics {
@@ -2143,8 +2354,10 @@ private enum CodexSessionUsageReader {
     }
 
     private static var weeklyQuotaCacheURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/LumaBar", isDirectory: true)
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return support
+            .appendingPathComponent("LumaBar", isDirectory: true)
             .appendingPathComponent("codex-weekly-quota.json")
     }
 
@@ -2274,6 +2487,10 @@ private enum CursorSessionUsageReader {
     }
 
     private static func transcriptTaskStates(in databaseURL: URL) -> [ExternalTaskState] {
+#if LUMA_APP_STORE
+        // Sandbox: ~/.cursor/projects is outside the Application Support bookmark — no silent probe.
+        return []
+#else
         let projectsRoot = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".cursor/projects", isDirectory: true)
         let resourceKeys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey]
@@ -2310,6 +2527,7 @@ private enum CursorSessionUsageReader {
                     databaseURL: databaseURL
                 )
             }
+#endif
     }
 
     private static func transcriptTaskState(
@@ -2588,8 +2806,15 @@ private enum KiroSessionUsageReader {
 
         guard let latest = sessions.first else {
             guard let credits = latestCredits() else { return nil }
-            let sessionURL = databaseURLs().first
+            let sessionURL: URL
+#if LUMA_APP_STORE
+            sessionURL = databaseURLs().first
+                ?? SecurityScopedBookmarks.resolvedURL(for: .kiroHome)
+                ?? FileManager.default.temporaryDirectory.appendingPathComponent("kiro-unavailable")
+#else
+            sessionURL = databaseURLs().first
                 ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".kiro")
+#endif
             if let previous,
                previous.source == .kiro,
                previous.kiroCredits == credits,
@@ -2693,6 +2918,11 @@ private enum KiroSessionUsageReader {
     }
 
     private static func databaseURLs() -> [URL] {
+#if LUMA_APP_STORE
+        // Sandbox: no silent Library/Application Support/Kiro probe without a bookmark.
+        // Kiro credits DB lives under Application Support; without an explicit grant, skip.
+        return []
+#else
         let supportRoot = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support", isDirectory: true)
         return ["Kiro"].compactMap { name in
@@ -2701,6 +2931,7 @@ private enum KiroSessionUsageReader {
                 .appendingPathComponent("User/globalStorage/state.vscdb")
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
         }
+#endif
     }
 
     private static func doubleValue(_ any: Any?) -> Double? {
@@ -2773,8 +3004,17 @@ private enum KiroSessionUsageReader {
     }
 
     private static func sessionDirectories() -> [URL] {
+#if LUMA_APP_STORE
+        guard let home = SecurityScopedBookmarks.resolvedURL(for: .kiroHome) else {
+            return []
+        }
+        let started = home.startAccessingSecurityScopedResource()
+        defer { if started { home.stopAccessingSecurityScopedResource() } }
+        let root = home.appendingPathComponent("sessions", isDirectory: true)
+#else
         let root = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".kiro/sessions", isDirectory: true)
+#endif
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -2883,23 +3123,36 @@ private enum ChatGPTSessionUsageReader {
 /// Cherry Studio stores agent sessions in `Data/agents.db`, and newer chat topics in `cherrystudio.sqlite`.
 private enum CherryStudioSessionUsageReader {
     static func taskStates() -> [ExternalTaskState] {
+#if LUMA_APP_STORE
+        guard let root = SecurityScopedBookmarks.resolvedURL(for: .cherryStudioSupport) else {
+            return []
+        }
+        let started = root.startAccessingSecurityScopedResource()
+        defer { if started { root.stopAccessingSecurityScopedResource() } }
+        return collectTaskStates(supportRoot: root)
+#else
+        return collectTaskStates(supportRoot: defaultSupportRoot())
+#endif
+    }
+
+    private static func collectTaskStates(supportRoot: URL) -> [ExternalTaskState] {
         var statesByID: [String: ExternalTaskState] = [:]
-        for state in chatTopicTaskStates() {
+        for state in chatTopicTaskStates(supportRoot: supportRoot) {
             statesByID[state.sessionID] = state
         }
-        for state in agentSessionTaskStates() {
+        for state in agentSessionTaskStates(supportRoot: supportRoot) {
             statesByID[state.sessionID] = state
         }
         return statesByID.values.sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    private static func supportRoot() -> URL {
+    private static func defaultSupportRoot() -> URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/CherryStudio", isDirectory: true)
     }
 
-    private static func chatTopicTaskStates() -> [ExternalTaskState] {
-        let dbURL = supportRoot().appendingPathComponent("cherrystudio.sqlite")
+    private static func chatTopicTaskStates(supportRoot: URL) -> [ExternalTaskState] {
+        let dbURL = supportRoot.appendingPathComponent("cherrystudio.sqlite")
         guard FileManager.default.fileExists(atPath: dbURL.path) else { return [] }
 
         let sql = """
@@ -2953,8 +3206,8 @@ private enum CherryStudioSessionUsageReader {
         }
     }
 
-    private static func agentSessionTaskStates() -> [ExternalTaskState] {
-        let dbURL = supportRoot().appendingPathComponent("Data/agents.db")
+    private static func agentSessionTaskStates(supportRoot: URL) -> [ExternalTaskState] {
+        let dbURL = supportRoot.appendingPathComponent("Data/agents.db")
         guard FileManager.default.fileExists(atPath: dbURL.path) else { return [] }
 
         let sql = """
@@ -6113,6 +6366,8 @@ final class IslandPanel: NSPanel {
 }
 
 final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    private var hoverTrackingArea: NSTrackingArea?
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
     }
@@ -6133,6 +6388,26 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
         layer?.isOpaque = false
+        updateTrackingAreas()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+            self.hoverTrackingArea = nil
+        }
+        // Keep hover hit-testing alive after expand/collapse frame changes.
+        let options: NSTrackingArea.Options = [
+            .mouseEnteredAndExited,
+            .mouseMoved,
+            .activeAlways,
+            .inVisibleRect,
+            .enabledDuringMouseDrag
+        ]
+        let area = NSTrackingArea(rect: .zero, options: options, owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverTrackingArea = area
     }
 }
 
@@ -6601,6 +6876,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                     self.isExpandedByBarHover = false
                     self.barHoverCollapseWorkItem?.cancel()
                     self.barHoverCollapseWorkItem = nil
+                    // Normal collapse must not leave Space paint suppress stuck on.
+                    if !self.isSpaceTransitionPending {
+                        self.model.suppressTransientIslandSurfaces = false
+                    }
                 }
                 // Space settle / suppress windows: snap visibility — never animate expand/collapse.
                 let animated = !self.isSpaceTransitionPending
@@ -6781,13 +7060,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     private func installBarHoverMonitors() {
-        globalBarHoverMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+        // Global: other apps key. Local: our panels key. Also catch mouseDragged so
+        // enter/exit still evaluate when the cursor is held down.
+        let moveEvents: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
+        globalBarHoverMonitor = NSEvent.addGlobalMonitorForEvents(matching: moveEvents) { [weak self] _ in
             let screenPoint = NSEvent.mouseLocation
             DispatchQueue.main.async { [weak self] in
                 self?.scheduleBarHoverEvaluation(screenPoint: screenPoint)
             }
         }
-        localBarHoverMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
+        localBarHoverMonitor = NSEvent.addLocalMonitorForEvents(matching: moveEvents) { [weak self] event in
             self?.scheduleBarHoverEvaluation(screenPoint: NSEvent.mouseLocation)
             return event
         }
@@ -6837,6 +7119,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             return
         }
 
+        // Compact trigger strips must always accept mouse for subsequent hovers.
+        leftWindow?.ignoresMouseEvents = false
+        rightWindow?.ignoresMouseEvents = false
+
         let layout = notchLayout()
         let compactFrame = layout.leftFrame
             .union(layout.cameraFrame)
@@ -6844,10 +7130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         if compactFrame.contains(screenPoint) {
             barHoverCollapseWorkItem?.cancel()
             barHoverCollapseWorkItem = nil
-            if !model.isExpanded {
-                isExpandedByBarHover = true
-                model.isExpanded = true
-            }
+            expandFromBarHoverIfNeeded()
             return
         }
 
@@ -6870,6 +7153,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         }
         barHoverCollapseWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.24, execute: workItem)
+    }
+
+    /// Hover expand must recover from "isExpanded=true but panel orderOut / opacity-0" deadlocks.
+    private func expandFromBarHoverIfNeeded() {
+        // User is on the bar — lift Space paint suppress so the next show isn't a no-op.
+        if model.suppressTransientIslandSurfaces, !isSpaceTransitionPending {
+            model.suppressTransientIslandSurfaces = false
+        }
+
+        isExpandedByBarHover = true
+        if !model.isExpanded {
+            model.isExpanded = true
+            return
+        }
+
+        // State already says expanded (e.g. prior show was blocked). Force remount/order-front.
+        if expandedWindow?.isVisible != true || (expandedWindow?.alphaValue ?? 0) < 0.05 {
+            showExpandedPanel(animated: true)
+        }
     }
 
     private func installSelectionTranslationMonitor() {
@@ -7643,17 +7945,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             // Keep paint suppress until after restore settles — prevents 1-frame expand flash.
             model.suppressTransientIslandSurfaces = true
             DispatchQueue.main.async { [weak self] in
-                guard let self, !self.isSpaceTransitionPending else { return }
-                // Only clear suppress when we are truly not mid-Space; pet may show again.
-                if !self.model.isExpanded {
-                    self.expandedWindow?.orderOut(nil)
-                }
-                self.model.suppressTransientIslandSurfaces = false
-                self.updateDesktopPetVisibility()
+                self?.endTransientIslandSurfaceSuppress()
             }
         } else {
-            model.suppressTransientIslandSurfaces = false
+            endTransientIslandSurfaceSuppress()
         }
+    }
+
+    /// Always clear Space paint suppress when safe; remount expanded panel if still requested.
+    private func endTransientIslandSurfaceSuppress() {
+        guard !isSpaceTransitionPending else { return }
+        if !model.isExpanded {
+            expandedWindow?.orderOut(nil)
+        }
+        model.suppressTransientIslandSurfaces = false
+        updateDesktopPetVisibility()
+        // Recover "expanded in model, blank/hidden on screen" after Space settle.
+        if model.isExpanded {
+            showExpandedPanel(animated: false)
+        }
+        leftWindow?.contentView?.updateTrackingAreas()
+        rightWindow?.contentView?.updateTrackingAreas()
     }
 
     /// Order out expanded + pet and zero their opacity so Spaces snapshots cannot flash them.
@@ -7938,12 +8250,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         guard model.isExpanded, let expandedWindow else { return }
         guard Date() >= suppressExpandedPanelUntil else { return }
         guard !isFrontmostApplicationFullScreen() else { return }
+        guard !isSpaceTransitionPending else { return }
+
+        // Recover stuck Space paint suppress without waiting for another hover.
+        if model.suppressTransientIslandSurfaces {
+            model.suppressTransientIslandSurfaces = false
+        }
 
         let targetFrame = expandedFrame()
         if expandedWindow.frame != targetFrame {
             expandedWindow.setFrame(targetFrame, display: true)
         }
         expandedWindow.alphaValue = 1
+        expandedWindow.ignoresMouseEvents = false
         if !expandedWindow.isVisible {
             showExpandedPanel(animated: false)
         }
@@ -8091,26 +8410,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     private func makeExpandedHostingView() -> NSView {
-        let rootView = Group {
-            if model.taskCompletionNotice != nil {
-                TaskCompletionOverlayView(model: model)
-            } else if model.isCodexTokenAutoExpanded {
-                CodexTokenOverlayView(model: model)
-            } else {
-                MusicExpandedView(model: model)
-            }
-        }
-        .frame(width: expandedPanelSize.width, height: expandedPanelSize.height)
-        // Hard-kill paint while collapsed / Space-settling — WindowServer may briefly restore the panel.
-        .opacity(model.isExpanded && !model.suppressTransientIslandSurfaces ? 1 : 0)
-        .allowsHitTesting(model.isExpanded && !model.suppressTransientIslandSurfaces)
-        .clipped()
-        .environment(\.islandTheme, model.theme)
-        // Liquid Glass: don't force dark scheme — it milks the behind-window blur gray/white.
-        .preferredColorScheme(model.theme == .liquidGlass ? nil : model.theme.preferredColorScheme)
-
         let hostingView = FirstMouseHostingView(
-            rootView: rootView
+            rootView: ExpandedIslandSurface(
+                model: model,
+                size: expandedPanelSize
+            )
         )
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
@@ -8473,6 +8777,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                 .preferredColorScheme(model.theme.preferredColorScheme)
         )
         cameraWindow?.ignoresMouseEvents = true
+        leftWindow?.ignoresMouseEvents = false
+        rightWindow?.ignoresMouseEvents = false
         expandedWindow?.contentView = makeExpandedHostingView()
         desktopPetWindow?.contentView = makeDesktopPetHostingView()
 
@@ -8490,6 +8796,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         ]
         rightWindow?.immediateActions = rightImmediateActions(for: layout.rightFrame.size)
         expandedWindow?.immediateActionRect = expandedCollapseHitRect()
+        leftWindow?.contentView?.updateTrackingAreas()
+        rightWindow?.contentView?.updateTrackingAreas()
 
         NSApp.unhideWithoutActivation()
         if isFrontmostApplicationFullScreen() {
@@ -8544,10 +8852,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
     private func showExpandedPanel(animated: Bool) {
         guard let expandedWindow else { return }
-        guard !isSpaceTransitionPending, !model.suppressTransientIslandSurfaces else {
+        guard !isSpaceTransitionPending else {
             expandedWindow.alphaValue = 0
             expandedWindow.orderOut(nil)
             return
+        }
+        // Hover / user expand always lifts paint suppress — otherwise the panel stays opacity-0 forever.
+        if model.suppressTransientIslandSurfaces {
+            model.suppressTransientIslandSurfaces = false
         }
         guard !isHiddenForFullScreen, !isFrontmostApplicationFullScreen() else {
             hideIslandPanelsForFullScreen()
@@ -8561,9 +8873,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             return
         }
 
+        expandedWindow.ignoresMouseEvents = false
         expandedWindow.setFrame(expandedFrame(), display: true)
         expandedWindow.contentView = makeExpandedHostingView()
+        expandedWindow.contentView?.updateTrackingAreas()
 
+        // IslandPanel.canBecomeKey == false → makeKeyAndOrderFront is unreliable after orderOut.
+        // Always use orderFrontRegardless for repeatable hover expand.
         if model.usesCompactExpandedOverlay {
             if animated {
                 expandedWindow.alphaValue = 0
@@ -8582,8 +8898,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
         if animated {
             expandedWindow.alphaValue = 0
-            NSApp.activate(ignoringOtherApps: true)
-            expandedWindow.makeKeyAndOrderFront(nil)
+            expandedWindow.orderFrontRegardless()
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.16
                 context.allowsImplicitAnimation = true
@@ -8591,17 +8906,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             }
         } else {
             expandedWindow.alphaValue = 1
-            NSApp.activate(ignoringOtherApps: true)
-            expandedWindow.makeKeyAndOrderFront(nil)
+            expandedWindow.orderFrontRegardless()
         }
     }
 
     private func hideExpandedPanel(animated: Bool) {
         guard let expandedWindow else { return }
+        isExpandedByBarHover = false
+        barHoverCollapseWorkItem?.cancel()
+        barHoverCollapseWorkItem = nil
 
         guard expandedWindow.isVisible else {
             expandedWindow.alphaValue = 1
             expandedWindow.orderOut(nil)
+            leftWindow?.contentView?.updateTrackingAreas()
+            rightWindow?.contentView?.updateTrackingAreas()
             return
         }
 
@@ -8619,11 +8938,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                     }
                     expandedWindow.orderOut(nil)
                     expandedWindow.alphaValue = 1
+                    self?.leftWindow?.contentView?.updateTrackingAreas()
+                    self?.rightWindow?.contentView?.updateTrackingAreas()
                 }
             }
         } else {
             expandedWindow.orderOut(nil)
             expandedWindow.alphaValue = 1
+            leftWindow?.contentView?.updateTrackingAreas()
+            rightWindow?.contentView?.updateTrackingAreas()
         }
     }
 
@@ -9961,19 +10284,27 @@ final class NetEaseBridge: @unchecked Sendable {
     /// Pause only NetEase Cloud Music — never a global / Music.app media command.
     @discardableResult
     func pauseNetEaseOnly() -> Bool {
+        // Prefer direct AppleScript pause (with timeout + playpause fallback) over MediaRemote —
+        // playlist switches often leave MR Now Playing PID stale while NetEase keeps playing.
+        if ExclusiveAudioFocus.pauseNetEase() {
+            return true
+        }
         if sendModernIfNetEase(command: .pause, options: nil) {
             return true
         }
-        return runNetEaseAppleScript("pause") || openOrpheusCommand(["cmd": "pause"])
+        return openOrpheusCommand(["cmd": "pause"])
     }
 
     /// Play only NetEase Cloud Music — never a global media key broadcast.
     @discardableResult
     func playNetEaseOnly() -> Bool {
+        if ExclusiveAudioFocus.playNetEase() {
+            return true
+        }
         if sendModernIfNetEase(command: .play, options: nil) {
             return true
         }
-        return runNetEaseAppleScript("play") || openOrpheusCommand(["cmd": "play"])
+        return openOrpheusCommand(["cmd": "play"])
     }
 
     @discardableResult
@@ -10069,18 +10400,33 @@ final class NetEaseBridge: @unchecked Sendable {
 
     @discardableResult
     private func runNetEaseAppleScript(_ command: String) -> Bool {
-        let script = """
+        let timed = """
+        using terms from application "NetEaseMusic"
+          tell application id "\(Self.bundleIdentifier)"
+            with timeout of 1 seconds
+              try
+                \(command)
+                return "ok"
+              end try
+            end timeout
+          end tell
+        end using terms
+        """
+        if ExclusiveAudioFocus.runAppleScript(timed) {
+            return true
+        }
+
+        let fallback = """
         tell application id "\(Self.bundleIdentifier)"
-          try
-            \(command)
-            return "ok"
-          end try
+          with timeout of 1 seconds
+            try
+              \(command)
+              return "ok"
+            end try
+          end timeout
         end tell
         """
-        var error: NSDictionary?
-        guard let appleScript = NSAppleScript(source: script) else { return false }
-        let result = appleScript.executeAndReturnError(&error)
-        return error == nil && result.stringValue != nil
+        return ExclusiveAudioFocus.runAppleScript(fallback)
     }
 
     @discardableResult
@@ -10497,6 +10843,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     private var lastSystemMetricsDate = Date.distantPast
     private var lastApplicationContextRefreshDate = Date.distantPast
     private var lastNetEaseRefreshDate = Date.distantPast
+    /// After a user force-pause, ignore stale MediaRemote "playing" samples briefly.
+    private var suppressNetEasePlayingUntil = Date.distantPast
     private var musicLibrarySourceUserPinUntil = Date.distantPast
     private var pendingNetEasePlaylistCoverIDs = Set<String>()
     private var pendingNetEasePlaylistTrackArtworkIDs = Set<String>()
@@ -11068,15 +11416,28 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var isDisplayingAppleMusicNowPlaying: Bool {
-        // Prefer the visible Apple Music tab so artwork/lyrics stay bound even if
-        // exclusive-playback flags briefly clear isUsingAppleMusic.
-        (musicLibrarySource == .appleMusic && appleMusicNowPlaying != nil)
-            || isUsingAppleMusic
-            || (audioPlayer == nil && isAppleMusicContext && appleMusicNowPlaying != nil)
+        // Visible library channel wins — channel switch is display-only.
+        switch musicLibrarySource {
+        case .appleMusic:
+            return appleMusicNowPlaying != nil
+        case .netEase:
+            return false
+        case .local:
+            return isUsingAppleMusic
+                || (audioPlayer == nil && isAppleMusicContext && appleMusicNowPlaying != nil)
+        }
     }
 
     var isDisplayingNetEaseNowPlaying: Bool {
-        isUsingNetEase || (audioPlayer == nil && isNetEaseContext && netEaseNowPlaying != nil)
+        switch musicLibrarySource {
+        case .netEase:
+            return netEaseNowPlaying != nil
+        case .appleMusic:
+            return false
+        case .local:
+            return isUsingNetEase
+                || (audioPlayer == nil && isNetEaseContext && netEaseNowPlaying != nil)
+        }
     }
 
     private var isAppleMusicContext: Bool {
@@ -11193,31 +11554,26 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         return !isDisplayingNetEaseNowPlaying && track == currentTrack
     }
 
+    /// Pure visual / control-surface switch.
+    /// Updates which app's cover/lyrics/list Luma Bar shows — **never** sends play/pause/resume.
+    /// Background playback of the previous app is left completely untouched.
     func setMusicLibrarySource(_ source: IslandMusicLibrarySource) {
-        let previous = musicLibrarySource
         musicLibrarySource = source
-        musicLibrarySourceUserPinUntil = Date().addingTimeInterval(1.2)
-        if previous != source {
-            // Switching tabs must silence the previous backend so two players never overlap.
-            activateExclusivePlayback(source: source)
-        }
+        // Pin long enough that auto-follow cannot yank the tab while the user is browsing.
+        musicLibrarySourceUserPinUntil = Date().addingTimeInterval(3.0)
+        // Do NOT mutate activeMusicSource / isUsing* — those track playback ownership from
+        // explicit Play/Pause / track taps only.
+
         switch source {
         case .netEase:
-            isUsingNetEase = true
-            isUsingAppleMusic = false
             refreshNetEasePlaylists()
             refreshNetEaseNowPlaying(force: true)
         case .appleMusic:
-            isUsingAppleMusic = true
-            isUsingNetEase = false
-            AppleMusicService.shared.openApplication(activates: false)
             AppleMusicService.shared.refresh { [weak self] in
                 self?.applyAppleMusicNowPlaying(AppleMusicService.shared.currentTrack)
-                self?.reconcileExclusiveAudioFocus()
             }
         case .local:
-            isUsingAppleMusic = false
-            isUsingNetEase = false
+            break
         }
     }
 
@@ -11249,6 +11605,37 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         isScanning = true
         scanMessage = "Scanning local and NetEase music"
 
+#if LUMA_APP_STORE
+        // Sandbox: only scan a user-granted music folder; never probe NetEase containers.
+        guard let musicRoot = SecurityScopedBookmarks.resolvedURL(for: .musicLibrary) else {
+            tracks = []
+            netEasePlaylists = []
+            currentIndex = 0
+            isScanning = false
+            scanMessage = "Grant a music folder to scan local tracks"
+            return
+        }
+        let started = musicRoot.startAccessingSecurityScopedResource()
+        let roots = [musicRoot]
+        Task { [weak self] in
+            defer {
+                if started {
+                    musicRoot.stopAccessingSecurityScopedResource()
+                }
+            }
+            let discovered = await Task.detached(priority: .userInitiated) {
+                await Self.discoverTracks(in: roots)
+            }.value
+
+            guard let self else { return }
+            self.tracks = discovered
+            self.netEasePlaylists = []
+            self.currentIndex = 0
+            self.isScanning = false
+            self.scanMessage = discovered.isEmpty ? "No music found" : "\(discovered.count) tracks found"
+            self.prepareCurrentTrack()
+        }
+#else
         let home = FileManager.default.homeDirectoryForCurrentUser
         let roots = Self.defaultMusicRoots(home: home)
 
@@ -11268,9 +11655,14 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             self.refreshMissingNetEasePlaylistCovers()
             self.prepareCurrentTrack()
         }
+#endif
     }
 
     func refreshNetEasePlaylists() {
+#if LUMA_APP_STORE
+        // Sandbox: no silent read of NetEase app-container SQLite.
+        netEasePlaylists = []
+#else
         let home = FileManager.default.homeDirectoryForCurrentUser
         DispatchQueue.global(qos: .utility).async {
             let playlists = Self.discoverNetEasePlaylists(home: home)
@@ -11279,6 +11671,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 self.refreshMissingNetEasePlaylistCovers()
             }
         }
+#endif
     }
 
     nonisolated private static func defaultMusicRoots(home: URL) -> [URL] {
@@ -11380,6 +11773,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     nonisolated private static func discoverNetEasePlaylists(home: URL) -> [NetEasePlaylist] {
+#if LUMA_APP_STORE
+        return []
+#else
         let databaseURL = home
             .appendingPathComponent("Library")
             .appendingPathComponent("Containers")
@@ -11428,6 +11824,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 playtime: row.playtime ?? 0
             )
         }
+#endif
     }
 
     nonisolated private static func discoverNetEasePlaylistTracks(
@@ -11435,6 +11832,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         playlistID: String,
         fallbackArtworkData: Data?
     ) -> [LocalTrack] {
+#if LUMA_APP_STORE
+        // Sandbox: skip NetEase container SQLite; online playlist fetch only.
+        return fetchNetEasePlaylistTracks(playlistID: playlistID, fallbackArtworkData: fallbackArtworkData)
+#else
         let databaseURL = home
             .appendingPathComponent("Library")
             .appendingPathComponent("Containers")
@@ -11574,6 +11975,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         return tracks.isEmpty
             ? fetchNetEasePlaylistTracks(playlistID: playlistID, fallbackArtworkData: fallbackArtworkData)
             : tracks
+#endif
     }
 
     nonisolated private static func resolvedNetEaseLocalTrackURL(path: String?, home: URL) -> URL? {
@@ -11685,6 +12087,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         artist: String,
         album: String
     ) -> NetEaseTrackMetadata? {
+#if LUMA_APP_STORE
+        return nil
+#else
         let databaseURL = home
             .appendingPathComponent("Library")
             .appendingPathComponent("Containers")
@@ -11787,6 +12192,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             album: normalizedNonEmpty(bestMatch.album) ?? album,
             coverURL: coverURL
         )
+#endif
     }
 
     nonisolated private static func sqliteStringLiteral(_ string: String) -> String {
@@ -13517,18 +13923,29 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
         let applePlaying =
             (appleMusicNowPlaying?.isPlaying == true) || AppleMusicService.shared.isPlaying
-        let netEasePlaying = netEaseNowPlaying?.isPlaying == true
         let localPlaying = audioPlayer?.isPlaying == true
+        // UI icon is the user-facing truth — after playlist switches MediaRemote often
+        // lags and netEaseNowPlaying?.isPlaying can be false while audio still plays.
+        let netEaseOwnsIsland =
+            isDisplayingNetEaseNowPlaying
+            || musicLibrarySource == .netEase
+            || activeMusicSource == .netEase
+            || isUsingNetEase
+        let netEasePlaying =
+            (netEaseNowPlaying?.isPlaying == true)
+            || (netEaseOwnsIsland && displayedIsPlaying && !applePlaying && !localPlaying)
 
-        // Case 1: Apple Music is currently playing → pause NetEase, playpause Music.
-        if applePlaying, !netEasePlaying {
-            executeTargetedPlayPause(target: .appleMusic, currentlyPlaying: true)
+        // Library channel the user selected is the control surface — never let a
+        // background app that is still playing steal the Play button.
+        if musicLibrarySource == .appleMusic {
+            executeTargetedPlayPause(target: .appleMusic, currentlyPlaying: applePlaying)
             return
         }
-
-        // Case 2: NetEase is currently playing → pause Music, playpause NetEase.
-        if netEasePlaying, !applePlaying {
-            executeTargetedPlayPause(target: .netEase, currentlyPlaying: true)
+        if musicLibrarySource == .netEase {
+            executeTargetedPlayPause(
+                target: .netEase,
+                currentlyPlaying: displayedIsPlaying || (netEaseNowPlaying?.isPlaying == true)
+            )
             return
         }
 
@@ -13546,8 +13963,24 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             markNetEasePausedInUI()
             DispatchQueue.global(qos: .userInitiated).async {
                 ExclusiveAudioFocus.pauseAppleMusic()
-                ExclusiveAudioFocus.pauseNetEase()
+                ExclusiveAudioFocus.pauseNetEase(likelyPlaying: true)
             }
+            return
+        }
+
+        // Case 1: Apple Music is currently playing → pause NetEase, playpause Music.
+        if applePlaying {
+            executeTargetedPlayPause(target: .appleMusic, currentlyPlaying: true)
+            return
+        }
+
+        // Case 2: NetEase owns the island / playback — force direct pause or play.
+        // Skip fragile MediaRemote "isPlaying" prechecks; follow the UI button.
+        if netEaseOwnsIsland || netEaseNowPlaying != nil {
+            executeTargetedPlayPause(
+                target: .netEase,
+                currentlyPlaying: displayedIsPlaying || (netEaseNowPlaying?.isPlaying == true)
+            )
             return
         }
 
@@ -13564,7 +13997,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             executeTargetedPlayPause(target: .appleMusic, currentlyPlaying: false)
             return
         case .netEase:
-            executeTargetedPlayPause(target: .netEase, currentlyPlaying: false)
+            executeTargetedPlayPause(target: .netEase, currentlyPlaying: displayedIsPlaying)
             return
         case .local:
             break
@@ -13605,7 +14038,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             if appleMusicNowPlaying != nil || musicLibrarySource == .appleMusic {
                 executeTargetedPlayPause(target: .appleMusic, currentlyPlaying: false)
             } else if netEaseNowPlaying != nil || musicLibrarySource == .netEase {
-                executeTargetedPlayPause(target: .netEase, currentlyPlaying: false)
+                executeTargetedPlayPause(target: .netEase, currentlyPlaying: displayedIsPlaying)
             } else {
                 scanLocalMusic()
             }
@@ -13633,8 +14066,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
     }
 
-    /// Pause the rival by bundle-ID AppleScript, then `playpause` only the target app.
-    /// Never posts NX_KEYTYPE_PLAY / CGEvent / global MediaRemote.
+    /// Explicit Play/Pause hub — the only path that may change external playback state.
+    /// On play: hard-silence rivals first (blocking), then play the target immediately.
+    /// On pause: pause only the target (rivals stay as-is).
     private func executeTargetedPlayPause(
         target: IslandMusicLibrarySource,
         currentlyPlaying: Bool
@@ -13643,23 +14077,29 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         let generation = exclusivePlayGeneration
 
         activeMusicSource = target
-        pauseLocalPlaybackEngine()
+        // Prefer live Now Playing; fall back to ownership flag when MR lags after a channel switch.
+        let netEaseLikelyPlaying =
+            (netEaseNowPlaying?.isPlaying == true) || (isUsingNetEase && target != .netEase)
 
         switch target {
         case .appleMusic:
             isUsingAppleMusic = true
             isUsingNetEase = false
-            markNetEasePausedInUI()
-            // Do not flip Play/Pause icon from the click alone — wait for Music.app
-            // player state after the targeted playpause, then bind UI to that.
+            pauseLocalPlaybackEngine()
+            if currentlyPlaying {
+                markAppleMusicPausedInUI()
+            } else {
+                markNetEasePausedInUI()
+            }
         case .netEase:
             isUsingNetEase = true
             isUsingAppleMusic = false
-            markAppleMusicPausedInUI()
+            pauseLocalPlaybackEngine()
             if currentlyPlaying {
-                markNetEasePausedInUI()
-            } else if let netEaseNowPlaying {
-                self.netEaseNowPlaying = netEaseNowPlaying.with(isPlaying: true)
+                forceNetEaseLocalPaused()
+            } else {
+                markAppleMusicPausedInUI()
+                forceNetEaseLocalPlaying()
             }
         case .local:
             isUsingAppleMusic = false
@@ -13670,25 +14110,48 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         syncMusicLibrarySourceToActivePlayback(force: false)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            switch target {
-            case .appleMusic:
-                ExclusiveAudioFocus.pauseNetEase()
-                ExclusiveAudioFocus.playPauseAppleMusic()
-            case .netEase:
-                ExclusiveAudioFocus.pauseAppleMusic()
-                ExclusiveAudioFocus.playPauseNetEase()
-            case .local:
-                ExclusiveAudioFocus.pauseAppleMusic()
-                ExclusiveAudioFocus.pauseNetEase()
+            if currentlyPlaying {
+                // Pause only the selected app — do not poke rivals (Space would toggle NetEase).
+                switch target {
+                case .appleMusic:
+                    ExclusiveAudioFocus.pauseAppleMusic()
+                case .netEase:
+                    _ = ExclusiveAudioFocus.pauseNetEase(likelyPlaying: true)
+                case .local:
+                    break
+                }
+            } else {
+                // Exclusive play: silence rivals FIRST (blocking), then play — no gap for dual audio.
+                ExclusiveAudioFocus.silenceRivals(
+                    of: target,
+                    netEaseLikelyPlaying: netEaseLikelyPlaying
+                )
+                switch target {
+                case .appleMusic:
+                    ExclusiveAudioFocus.playAppleMusic()
+                case .netEase:
+                    _ = ExclusiveAudioFocus.playNetEase()
+                case .local:
+                    break
+                }
             }
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            DispatchQueue.main.async {
                 guard let self, self.exclusivePlayGeneration == generation else { return }
                 if target == .appleMusic {
-                    // Verify return status from Music.app — icon follows playerState only.
+                    if !currentlyPlaying {
+                        AppleMusicService.shared.applyOptimisticIsPlaying(true)
+                    }
                     AppleMusicService.shared.refresh {
                         self.applyAppleMusicNowPlaying(AppleMusicService.shared.currentTrack)
                     }
+                } else if target == .netEase {
+                    if currentlyPlaying {
+                        self.forceNetEaseLocalPaused()
+                    } else {
+                        self.forceNetEaseLocalPlaying()
+                    }
+                    self.refreshNetEaseNowPlaying(force: true)
                 }
             }
         }
@@ -13725,7 +14188,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
     }
 
-    /// Pause every rival by bundle-ID AppleScript, wait 50ms, then play only `target`.
+    /// Pause every rival (blocking), then play only `target` — no deferred gap for dual audio.
     /// Never synthesizes NX_KEYTYPE_PLAY / global media keys.
     private func ensureSinglePlayerPlaying(
         target: IslandMusicLibrarySource,
@@ -13733,6 +14196,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     ) {
         exclusivePlayGeneration &+= 1
         let generation = exclusivePlayGeneration
+        let netEaseLikelyPlaying =
+            (netEaseNowPlaying?.isPlaying == true) || (isUsingNetEase && target != .netEase)
 
         activeMusicSource = target
         switch target {
@@ -13755,17 +14220,13 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         syncMusicLibrarySourceToActivePlayback(force: false)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            switch target {
-            case .appleMusic:
-                ExclusiveAudioFocus.pauseNetEase()
-            case .netEase:
-                ExclusiveAudioFocus.pauseAppleMusic()
-            case .local:
-                ExclusiveAudioFocus.pauseAppleMusic()
-                ExclusiveAudioFocus.pauseNetEase()
-            }
+            // Hard exclusive: rivals must be paused before any play command.
+            ExclusiveAudioFocus.silenceRivals(
+                of: target,
+                netEaseLikelyPlaying: netEaseLikelyPlaying
+            )
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            DispatchQueue.main.async {
                 guard let self, self.exclusivePlayGeneration == generation else { return }
                 if let playAction {
                     playAction()
@@ -13773,7 +14234,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 }
                 switch target {
                 case .appleMusic:
-                    // Bundle-ID play — also mirror into AppleMusicService UI clock.
                     ExclusiveAudioFocus.playAppleMusic()
                     AppleMusicService.shared.play()
                     if var info = self.appleMusicNowPlaying {
@@ -13797,6 +14257,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     private func activateExclusivePlayback(source: IslandMusicLibrarySource) {
         // Used by next/previous/open — pause rivals immediately; play is caller's job.
         exclusivePlayGeneration &+= 1
+        let netEaseLikelyPlaying = netEaseNowPlaying?.isPlaying == true
         activeMusicSource = source
         switch source {
         case .appleMusic:
@@ -13805,7 +14266,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             pauseLocalPlaybackEngine()
             markNetEasePausedInUI()
             DispatchQueue.global(qos: .userInitiated).async {
-                ExclusiveAudioFocus.pauseNetEase()
+                ExclusiveAudioFocus.silenceRivals(
+                    of: .appleMusic,
+                    netEaseLikelyPlaying: netEaseLikelyPlaying
+                )
             }
         case .netEase:
             isUsingNetEase = true
@@ -13813,7 +14277,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             pauseLocalPlaybackEngine()
             markAppleMusicPausedInUI()
             DispatchQueue.global(qos: .userInitiated).async {
-                ExclusiveAudioFocus.pauseAppleMusic()
+                ExclusiveAudioFocus.silenceRivals(
+                    of: .netEase,
+                    netEaseLikelyPlaying: false
+                )
             }
         case .local:
             isUsingAppleMusic = false
@@ -13821,8 +14288,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             markAppleMusicPausedInUI()
             markNetEasePausedInUI()
             DispatchQueue.global(qos: .userInitiated).async {
-                ExclusiveAudioFocus.pauseAppleMusic()
-                ExclusiveAudioFocus.pauseNetEase()
+                ExclusiveAudioFocus.silenceRivals(
+                    of: .local,
+                    netEaseLikelyPlaying: netEaseLikelyPlaying
+                )
             }
         }
         syncMusicLibrarySourceToActivePlayback(force: false)
@@ -13850,9 +14319,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         let playingCount = [applePlaying, netEasePlaying, localPlaying].filter { $0 }.count
         guard playingCount > 1 else { return }
 
-        // Avoid spamming AppleScript every 100ms timer tick while dual-play residue clears.
+        // Safety net only — primary exclusive path must silence before play.
+        // Keep this snappy so dual-audio residue dies in <200ms, not seconds.
         let now = Date()
-        guard now.timeIntervalSince(lastExclusiveAudioReconcileDate) >= 1.0 else { return }
+        guard now.timeIntervalSince(lastExclusiveAudioReconcileDate) >= 0.2 else { return }
         lastExclusiveAudioReconcileDate = now
 
         let preferred: IslandMusicLibrarySource = {
@@ -13876,13 +14346,13 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             default:
                 break
             }
-            // Default priority when both streamers collide: Apple Music.
             if applePlaying { return .appleMusic }
             if netEasePlaying { return .netEase }
             return .local
         }()
 
         activeMusicSource = preferred
+        let netEaseLikelyPlaying = netEasePlaying
         switch preferred {
         case .appleMusic:
             isUsingAppleMusic = true
@@ -13890,7 +14360,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             pauseLocalPlaybackEngine()
             markNetEasePausedInUI()
             DispatchQueue.global(qos: .userInitiated).async {
-                ExclusiveAudioFocus.pauseNetEase()
+                ExclusiveAudioFocus.silenceRivals(
+                    of: .appleMusic,
+                    netEaseLikelyPlaying: netEaseLikelyPlaying
+                )
             }
         case .netEase:
             isUsingNetEase = true
@@ -13898,7 +14371,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             pauseLocalPlaybackEngine()
             markAppleMusicPausedInUI()
             DispatchQueue.global(qos: .userInitiated).async {
-                ExclusiveAudioFocus.pauseAppleMusic()
+                ExclusiveAudioFocus.silenceRivals(
+                    of: .netEase,
+                    netEaseLikelyPlaying: false
+                )
             }
         case .local:
             isUsingAppleMusic = false
@@ -13906,8 +14382,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             markAppleMusicPausedInUI()
             markNetEasePausedInUI()
             DispatchQueue.global(qos: .userInitiated).async {
-                ExclusiveAudioFocus.pauseAppleMusic()
-                ExclusiveAudioFocus.pauseNetEase()
+                ExclusiveAudioFocus.silenceRivals(
+                    of: .local,
+                    netEaseLikelyPlaying: netEaseLikelyPlaying
+                )
             }
         }
     }
@@ -13920,9 +14398,28 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     private func markNetEasePausedInUI() {
+        forceNetEaseLocalPaused()
+    }
+
+    /// Hard-stop local NetEase UI / lyric clock regardless of remote Now Playing truth.
+    private func forceNetEaseLocalPaused() {
         if let netEaseNowPlaying {
             self.netEaseNowPlaying = netEaseNowPlaying.with(isPlaying: false)
         }
+        netEaseProgressClock.lockForPause()
+        suppressNetEasePlayingUntil = Date().addingTimeInterval(2.0)
+        isPlaying = false
+        objectWillChange.send()
+    }
+
+    /// Optimistic play UI — icon flips even if NetEase AE is rejected.
+    private func forceNetEaseLocalPlaying() {
+        suppressNetEasePlayingUntil = .distantPast
+        if let netEaseNowPlaying {
+            self.netEaseNowPlaying = netEaseNowPlaying.with(isPlaying: true)
+        }
+        netEaseProgressClock.resumePlayback()
+        objectWillChange.send()
     }
 
     private func pauseLocalPlaybackEngine() {
@@ -13986,6 +14483,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         if shouldRouteControlsToAppleMusic {
             ensureSinglePlayerPlaying(target: .appleMusic) {
                 AppleMusicService.shared.next()
+                // Align island UI after skip+play settles.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    AppleMusicService.shared.refresh {
+                        self?.applyAppleMusicNowPlaying(AppleMusicService.shared.currentTrack)
+                    }
+                }
             }
             return
         }
@@ -13993,6 +14496,14 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         if shouldRouteControlsToNetEase {
             ensureSinglePlayerPlaying(target: .netEase) {
                 _ = NetEaseBridge.shared.send(.nextTrack)
+                // NetEase next often leaves playback paused — force Space/play after skip.
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.15) {
+                    _ = ExclusiveAudioFocus.playNetEase()
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                    self?.forceNetEaseLocalPlaying()
+                    self?.refreshNetEaseNowPlaying(force: true)
+                }
             }
             return
         }
@@ -14012,6 +14523,11 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         if shouldRouteControlsToAppleMusic {
             ensureSinglePlayerPlaying(target: .appleMusic) {
                 AppleMusicService.shared.previous()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    AppleMusicService.shared.refresh {
+                        self?.applyAppleMusicNowPlaying(AppleMusicService.shared.currentTrack)
+                    }
+                }
             }
             return
         }
@@ -14019,6 +14535,13 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         if shouldRouteControlsToNetEase {
             ensureSinglePlayerPlaying(target: .netEase) {
                 _ = NetEaseBridge.shared.send(.previousTrack)
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.15) {
+                    _ = ExclusiveAudioFocus.playNetEase()
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                    self?.forceNetEaseLocalPlaying()
+                    self?.refreshNetEaseNowPlaying(force: true)
+                }
             }
             return
         }
@@ -16077,6 +16600,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     nonisolated private static func bestNetEaseOfflineTrack(matching query: String) -> LocalTrack? {
+#if LUMA_APP_STORE
+        return nil
+#else
         let home = FileManager.default.homeDirectoryForCurrentUser
         var candidates: [LocalTrack] = []
 
@@ -16159,6 +16685,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
 
         return bestScoredTrack(in: candidates, matching: query)
+#endif
     }
 
     private func playMusicQuery(_ query: String, player: String?) {
@@ -17201,6 +17728,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
         let forceCalibrate = pendingNetEaseSeek != nil
             || (!currentNetEaseTrackIdentity.isEmpty && incomingIdentity != currentNetEaseTrackIdentity)
+        // User force-pause: keep UI/lyrics paused even if MediaRemote still reports playing.
+        if Date() < suppressNetEasePlayingUntil {
+            nowPlaying = nowPlaying.with(isPlaying: false)
+        }
         if isSeekingPlayback {
             if var existing = netEaseNowPlaying,
                Self.netEaseTrackIdentity(
@@ -17235,34 +17766,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         netEaseNowPlaying = nowPlaying
         refreshResolvedNetEaseDetails(for: nowPlaying)
 
-        // Never steal exclusive ownership from Apple Music / local island sessions.
-        if activeMusicSource == .appleMusic || isUsingAppleMusic {
-            return
+        // Metadata sync only — never play/pause rivals here.
+        // Exclusive audio focus is owned solely by Play/Pause / track-tap paths.
+        if musicLibrarySource == .netEase, nowPlaying.isPlaying {
+            isUsingNetEase = true
+            activeMusicSource = .netEase
         }
-        if activeMusicSource == .local, audioPlayer?.isPlaying == true {
-            return
-        }
-
-        let localPlayerIsActive = audioPlayer?.isPlaying == true
-        let shouldClaimNetEase = isUsingNetEase
-            || activeMusicSource == .netEase
-            || (nowPlaying.isPlaying && musicLibrarySource == .netEase)
-            || (nowPlaying.isPlaying && !isUsingAppleMusic && musicLibrarySource != .appleMusic)
-
-        guard shouldClaimNetEase else { return }
-
-        if localPlayerIsActive {
-            audioPlayer?.pause()
-            isPlaying = false
-        }
-        if (appleMusicNowPlaying?.isPlaying == true) || AppleMusicService.shared.isPlaying {
-            pauseAppleMusicPlaybackEngine()
-        }
-        isUsingNetEase = true
-        isUsingAppleMusic = false
-        activeMusicSource = .netEase
-        syncMusicLibrarySourceToActivePlayback()
-        reconcileExclusiveAudioFocus()
     }
 
     private var lastAppleMusicRefreshDate = Date.distantPast
@@ -17373,34 +17882,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         appleMusicNowPlaying = nowPlaying
         refreshResolvedAppleMusicDetails(for: nowPlaying)
 
-        // Never steal exclusive ownership from NetEase / local island sessions.
-        if activeMusicSource == .netEase || isUsingNetEase {
-            return
+        // Metadata sync only — never play/pause rivals here.
+        // Exclusive audio focus is owned solely by Play/Pause / track-tap paths.
+        if musicLibrarySource == .appleMusic, nowPlaying.isPlaying {
+            isUsingAppleMusic = true
+            activeMusicSource = .appleMusic
         }
-        if activeMusicSource == .local, audioPlayer?.isPlaying == true {
-            return
-        }
-
-        let localPlayerIsActive = audioPlayer?.isPlaying == true
-        let shouldClaimAppleMusic = isUsingAppleMusic
-            || activeMusicSource == .appleMusic
-            || musicLibrarySource == .appleMusic
-            || (nowPlaying.isPlaying && !isUsingNetEase && musicLibrarySource != .netEase)
-
-        guard shouldClaimAppleMusic else { return }
-
-        if localPlayerIsActive {
-            audioPlayer?.pause()
-            isPlaying = false
-        }
-        if netEaseNowPlaying?.isPlaying == true {
-            pauseNetEasePlaybackEngine()
-        }
-        isUsingAppleMusic = true
-        isUsingNetEase = false
-        activeMusicSource = .appleMusic
-        syncMusicLibrarySourceToActivePlayback()
-        reconcileExclusiveAudioFocus()
     }
 
     private func refreshResolvedAppleMusicDetails(for nowPlaying: MusicNowPlayingInfo) {
@@ -22123,6 +22610,33 @@ struct AgentDashboardView: View {
                     .strokeBorder(Color.white.opacity(0.24), lineWidth: 0.7)
             }
         }
+    }
+}
+
+/// Reactive expanded surface — opacity / hit-testing must observe `@Published` flags
+/// so Space suppress and collapse cannot leave a permanently invisible panel.
+private struct ExpandedIslandSurface: View {
+    @ObservedObject var model: MusicPlayerModel
+    let size: NSSize
+
+    var body: some View {
+        Group {
+            if model.taskCompletionNotice != nil {
+                TaskCompletionOverlayView(model: model)
+            } else if model.isCodexTokenAutoExpanded {
+                CodexTokenOverlayView(model: model)
+            } else {
+                MusicExpandedView(model: model)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        // Hard-kill paint while collapsed / Space-settling — WindowServer may briefly restore the panel.
+        .opacity(model.isExpanded && !model.suppressTransientIslandSurfaces ? 1 : 0)
+        .allowsHitTesting(model.isExpanded && !model.suppressTransientIslandSurfaces)
+        .clipped()
+        .environment(\.islandTheme, model.theme)
+        // Liquid Glass: don't force dark scheme — it milks the behind-window blur gray/white.
+        .preferredColorScheme(model.theme == .liquidGlass ? nil : model.theme.preferredColorScheme)
     }
 }
 

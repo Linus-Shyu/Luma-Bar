@@ -17,16 +17,16 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.2.2</string>
+	<string>0.3.3</string>
 	<key>CFBundleVersion</key>
-	<string>5</string>
+	<string>7</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Luma Bar Core Team</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>luma bar uses automation only for Agent actions you request, such as reading the active browser tab or sending a confirmed message.</string>
-<key>NSContactsUsageDescription</key>
+	<string>Luma Bar requires permission to control Apple Music and NetEase Cloud Music via AppleScript to synchronize playback status and display lyrics.</string>
+	<key>NSContactsUsageDescription</key>
 	<string>luma bar looks up a contact only when you ask the Agent to prepare a message to that person.</string>
 	<key>NSDesktopFolderUsageDescription</key>
 	<string>luma bar may access the Desktop only for files you select or Agent actions you confirm.</string>

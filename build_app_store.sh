@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Build a sandboxed Mac App Store–oriented .app (local install / archive prep).
-# Usage: LUMA_APP_STORE=1 ./build_app_store.sh
+# ALWAYS forces LUMA_APP_STORE=1 so MediaRemote / private paths are compiled out.
+# Usage: ./build_app_store.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
+# Hard lock: never allow an unset / overridden non-MAS build through this script.
 export LUMA_APP_STORE=1
 
 SECRETS="$ROOT/Sources/LumaBar/BundledAgentSecrets.swift"
@@ -34,9 +36,21 @@ fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-echo "Building with LUMA_APP_STORE=1 …"
-swift build -c release
+echo "Building with LUMA_APP_STORE=1 (Package.swift define + -Xswiftc -DLUMA_APP_STORE) …"
+# Package.swift reads LUMA_APP_STORE=1 → .define("LUMA_APP_STORE").
+# Also pass -Xswiftc -DLUMA_APP_STORE so the macro cannot be dropped if Package.swift is bypassed.
+swift build -c release -Xswiftc -DLUMA_APP_STORE
 cp "$ROOT/.build/release/LumaBar" "$APP/Contents/MacOS/LumaBar"
+
+# Guardrail: private MediaRemote must not appear in the MAS binary.
+if nm -u "$APP/Contents/MacOS/LumaBar" 2>/dev/null | grep -qi 'MediaRemote'; then
+  echo "error: MediaRemote symbols found in MAS binary — aborting" >&2
+  exit 1
+fi
+if strings "$APP/Contents/MacOS/LumaBar" 2>/dev/null | grep -q 'PrivateFrameworks/MediaRemote.framework'; then
+  echo "error: MediaRemote framework path string found in MAS binary — aborting" >&2
+  exit 1
+fi
 
 cp "$ROOT/Support/Info.plist" "$APP/Contents/Info.plist"
 # Tag Info.plist so we can tell MAS builds apart locally.
@@ -66,4 +80,5 @@ else
 fi
 
 echo "Built MAS-oriented app: $APP"
+echo "Entitlements: $ENTITLEMENTS (includes temporary-exception.apple-events for Music + NetEase)"
 echo "Next: archive via Xcode with Mac App Store distribution profile, or transporter upload."

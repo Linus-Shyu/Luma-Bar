@@ -90,6 +90,45 @@ final class AppleMusicService: MusicServiceProtocol {
         runMusicCommand("play", refreshAfter: true)
     }
 
+    /// Launch Music if needed and `play` only when a current track exists (no empty-queue error dialogs).
+    /// Returns whether a play command was issued.
+    @discardableResult
+    nonisolated static func playCurrentTrackIfAvailable() -> Bool {
+        let script = """
+        tell application "Music"
+          try
+            launch
+          end try
+          delay 0.12
+          try
+            if exists current track then
+              play
+              return "played"
+            end if
+          end try
+          return "empty"
+        end tell
+        """
+        let output = runAppleScriptReturningString(script)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return output == "played"
+    }
+
+    /// Whether Music.app currently has a track that can be resumed/played.
+    nonisolated static func hasPlayableCurrentTrack() -> Bool {
+        let script = """
+        tell application "Music"
+          try
+            if exists current track then return "yes"
+          end try
+          return "no"
+        end tell
+        """
+        let output = runAppleScriptReturningString(script)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return output == "yes"
+    }
+
     func pause() {
         progressClock.lockForPause()
         let locked = progressClock.calculatedCurrentTime()
@@ -153,7 +192,9 @@ final class AppleMusicService: MusicServiceProtocol {
         progressClock.reset()
         artworkInflightKey = ""
         artworkResolvedKey = ""
-        runMusicCommand("next track", refreshAfter: true)
+        // Music.app often lands on pause after `next track` — force play in the same script.
+        bindPlayerState(.playing)
+        runMusicSkipThenPlay(direction: .next)
     }
 
     func previous() {
@@ -162,7 +203,39 @@ final class AppleMusicService: MusicServiceProtocol {
         progressClock.reset()
         artworkInflightKey = ""
         artworkResolvedKey = ""
-        runMusicCommand("previous track", refreshAfter: true)
+        bindPlayerState(.playing)
+        runMusicSkipThenPlay(direction: .previous)
+    }
+
+    private enum SkipDirection {
+        case next
+        case previous
+
+        var appleScriptCommand: String {
+            switch self {
+            case .next: return "next track"
+            case .previous: return "previous track"
+            }
+        }
+    }
+
+    /// `next/previous track` + immediate `play` so skip never leaves Music.app paused.
+    private func runMusicSkipThenPlay(direction: SkipDirection) {
+        let script = """
+        tell application "Music"
+          try
+            \(direction.appleScriptCommand)
+            play
+          end try
+        end tell
+        """
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            _ = Self.runAppleScriptReturningString(script)
+            DispatchQueue.main.async {
+                self?.bindPlayerState(.playing)
+                self?.scheduleRefresh(after: 0.2)
+            }
+        }
     }
 
     /// Optimistic UI update on the main actor; AppleScript runs off-thread.
@@ -514,7 +587,7 @@ final class AppleMusicService: MusicServiceProtocol {
             _ = Self.runAppleScriptReturningString(script)
             guard refreshAfter else { return }
             DispatchQueue.main.async {
-                self?.scheduleRefresh(after: 0.3)
+                self?.scheduleRefresh(after: 0.2)
             }
         }
     }
