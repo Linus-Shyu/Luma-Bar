@@ -1,0 +1,33 @@
+---
+description: Always create a version tag when shipping/pushing updates
+alwaysApply: true
+---
+
+# Version tags on every ship
+
+Whenever you **commit + push** a meaningful update to Luma Bar (features, fixes, releases — not tiny typo-only commits unless the user asks), you MUST also:
+
+1. Create an **annotated** git tag on that commit following semver (`v0.3.1`, `v0.4.0`, …).
+2. Write a short tag message summarizing what this rollback point contains.
+3. **Push the tag** to origin (`git push origin <tag>`).
+4. Tell the user the tag name and how to roll back.
+
+## Versioning hints
+
+- Existing tags: `v0.1.0`, `v0.2.1`, `v0.3.0` (closed-source Liquid Glass baseline).
+- Patch (`vX.Y.Z+1`): bugfixes, sync/lyric/play-pause fixes, small polish.
+- Minor (`vX.Y+1.0`): new features, larger behavior changes.
+- Major (`vX+1.0.0`): breaking / big product shifts — only if user asks.
+
+## Do not forget
+
+- Pushing `main` without a tag is incomplete for ship requests.
+- If the user says「推上去 / 发版 / 更新推送」, treat tagging as required unless they explicitly say no tag.
+- Never rewrite or move published tags unless the user explicitly asks.
+
+## Rollback blurb (include in reply)
+
+```bash
+git checkout vX.Y.Z
+# or: git reset --hard vX.Y.Z
+```
