@@ -327,4 +327,11 @@ enum HelpGuidePresenter {
         window?.orderOut(nil)
         window = nil
     }
+
+    /// Rebuild the open Help window after a language change.
+    static func reloadForLanguageChange() {
+        guard window != nil else { return }
+        close()
+        show()
+    }
 }

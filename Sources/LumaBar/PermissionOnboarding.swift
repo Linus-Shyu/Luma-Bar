@@ -36,20 +36,17 @@ enum LumaBarPermission: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .accessibility: "辅助功能"
-        case .automation: "自动化控制"
-        case .screenRecording: "屏幕录制"
+        case .accessibility: LumaBarL10n.permissionAccessibilityTitle
+        case .automation: LumaBarL10n.permissionAutomationTitle
+        case .screenRecording: LumaBarL10n.permissionScreenTitle
         }
     }
 
     var subtitle: String {
         switch self {
-        case .accessibility:
-            "划词翻译、Agent 读取选区与前台 App 上下文"
-        case .automation:
-            "通过 AppleScript 同步 Apple Music / 网易云播放状态"
-        case .screenRecording:
-            "截图分析当前窗口（可选，可稍后开启）"
+        case .accessibility: LumaBarL10n.permissionAccessibilitySubtitle
+        case .automation: LumaBarL10n.permissionAutomationSubtitle
+        case .screenRecording: LumaBarL10n.permissionScreenSubtitle
         }
     }
 
@@ -73,21 +70,21 @@ enum LumaBarPermission: String, CaseIterable, Identifiable {
         switch self {
         case .accessibility:
             [
-                "点击「授权」或「打开系统设置」",
-                "在「隐私与安全性 → 辅助功能」中找到 luma bar",
-                "打开右侧开关，再回到本窗口（无需重启）"
+                LumaBarL10n.permissionGuideAccessibility1,
+                LumaBarL10n.permissionGuideAccessibility2,
+                LumaBarL10n.permissionGuideAccessibility3
             ]
         case .automation:
             [
-                "点击「授权」弹出系统询问时选择「好」",
-                "或打开「隐私与安全性 → 自动化」，允许控制 Music / 系统事件",
-                "返回 Luma Bar 后状态会自动刷新"
+                LumaBarL10n.permissionGuideAutomation1,
+                LumaBarL10n.permissionGuideAutomation2,
+                LumaBarL10n.permissionGuideAutomation3
             ]
         case .screenRecording:
             [
-                "点击「授权」按系统提示允许屏幕录制",
-                "也可在「隐私与安全性 → 屏幕录制」中手动打开",
-                "不需要的话可以先跳过，不影响日常听歌"
+                LumaBarL10n.permissionGuideScreen1,
+                LumaBarL10n.permissionGuideScreen2,
+                LumaBarL10n.permissionGuideScreen3
             ]
         }
     }
@@ -107,11 +104,11 @@ enum LumaBarPermissionState: Equatable {
 
     var label: String {
         switch self {
-        case .notDetermined: "待授权"
-        case .requesting: "请求中…"
-        case .authorized: "已完成"
-        case .denied: "未开启"
-        case .restricted: "受限制"
+        case .notDetermined: LumaBarL10n.permissionStatePending
+        case .requesting: LumaBarL10n.permissionStateRequesting
+        case .authorized: LumaBarL10n.permissionStateDone
+        case .denied: LumaBarL10n.permissionStateOff
+        case .restricted: LumaBarL10n.permissionStateRestricted
         }
     }
 }
@@ -139,17 +136,26 @@ final class PermissionOnboardingModel: ObservableObject {
     var onPermissionBecameAuthorized: ((LumaBarPermission) -> Void)?
     var onSoftReminder: ((String) -> Void)?
 
+    /// When false (menu → Permission Setup after first run), never auto-close the window.
+    private let allowsAutoFinish: Bool
     private let onFinished: () -> Void
     private var previousAuthorized: Set<LumaBarPermission> = []
     private var pollTask: Task<Void, Never>?
     private var celebrateTask: Task<Void, Never>?
     private var autoFinishTask: Task<Void, Never>?
 
-    init(onFinished: @escaping () -> Void) {
+    init(onFinished: @escaping () -> Void, allowsAutoFinish: Bool = true) {
         self.onFinished = onFinished
+        self.allowsAutoFinish = allowsAutoFinish
         skipped = Self.loadSkipped()
+        // Seed from current TCC state *before* refresh. Otherwise every already-granted
+        // permission counts as "newly authorized" and maybeAutoAdvance closes the window
+        // ~0.7s after opening Permission Setup from the menu.
+        let snapshot = Self.readSnapshot()
+        previousAuthorized = Set(
+            LumaBarPermission.onboardingCases.filter { snapshot[$0]?.isAuthorized == true }
+        )
         refresh()
-        previousAuthorized = authorizedSet
     }
 
     static var hasCompletedSetup: Bool {
@@ -190,9 +196,9 @@ final class PermissionOnboardingModel: ObservableObject {
     }
 
     var primaryActionTitle: String {
-        if canFinishComfortably { return "完成并开始" }
-        if allCoreAuthorized { return "开始使用" }
-        return "稍后再说"
+        if canFinishComfortably { return LumaBarL10n.permissionFinishReady }
+        if allCoreAuthorized { return LumaBarL10n.permissionFinishStart }
+        return LumaBarL10n.permissionFinishLater
     }
 
     private var authorizedSet: Set<LumaBarPermission> {
@@ -287,18 +293,20 @@ final class PermissionOnboardingModel: ObservableObject {
 
     func finish() {
         autoFinishTask?.cancel()
+        pollTask?.cancel()
+        celebrateTask?.cancel()
         UserDefaults.standard.set(true, forKey: Self.completionKey)
         Self.persistSkipped(skipped)
 
         var tips: [String] = []
         if states[.accessibility]?.isAuthorized != true {
-            tips.append("划词翻译还需开启「辅助功能」，可在菜单栏 → Permission Setup 再开。")
+            tips.append(LumaBarL10n.permissionTipAccessibility)
         }
         if states[.automation]?.isAuthorized != true {
-            tips.append("音乐同步需要「自动化」权限，播放控制可能暂时不可用。")
+            tips.append(LumaBarL10n.permissionTipAutomation)
         }
         if skipped.contains(.screenRecording), states[.screenRecording]?.isAuthorized != true {
-            tips.append("已跳过屏幕录制；需要截图分析时再去权限设置开启即可。")
+            tips.append(LumaBarL10n.permissionTipScreen)
         }
         if let tip = tips.first {
             onSoftReminder?(tip)
@@ -307,11 +315,12 @@ final class PermissionOnboardingModel: ObservableObject {
     }
 
     private func maybeAutoAdvance() {
+        guard allowsAutoFinish else { return }
         guard canFinishComfortably else { return }
         autoFinishTask?.cancel()
         autoFinishTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
-            guard !Task.isCancelled, canFinishComfortably else { return }
+            guard !Task.isCancelled, allowsAutoFinish, canFinishComfortably else { return }
             finish()
         }
     }
@@ -438,6 +447,7 @@ final class PermissionOnboardingModel: ObservableObject {
 struct PermissionOnboardingView: View {
     @ObservedObject var model: PermissionOnboardingModel
     @Environment(\.colorScheme) private var colorScheme
+    @State private var languageRevision = 0
 
     private let timer = Timer.publish(every: 0.55, on: .main, in: .common).autoconnect()
 
@@ -477,9 +487,13 @@ struct PermissionOnboardingView: View {
         }
         .frame(width: 440, height: 560)
         .background(pageBackground)
+        .id(languageRevision)
         .onReceive(timer) { _ in model.pollTick() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.syncFromSystemSettings()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: LumaBarAppLanguage.didChangeNotification)) { _ in
+            languageRevision += 1
         }
         .onAppear { model.refresh() }
     }
@@ -507,9 +521,9 @@ struct PermissionOnboardingView: View {
             }
 
             VStack(spacing: 6) {
-                Text("权限引导")
+                Text(LumaBarL10n.permissionTitle)
                     .font(.system(size: 22, weight: .bold, design: .rounded))
-                Text("开启下列能力后，Luma Bar 才能完整工作。从系统设置返回时会自动刷新状态。")
+                Text(LumaBarL10n.permissionSubtitle)
                     .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -541,16 +555,19 @@ struct PermissionOnboardingView: View {
             .frame(height: 6)
 
             HStack {
-                Text("\(model.authorizedCount)/\(model.totalCount) 已授权")
+                Text(LumaBarL10n.permissionAuthorizedCount(
+                    authorized: model.authorizedCount,
+                    total: model.totalCount
+                ))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
                 if model.allCoreAuthorized {
-                    Label("核心权限已就绪", systemImage: "checkmark.seal.fill")
+                    Label(LumaBarL10n.permissionCoreReady, systemImage: "checkmark.seal.fill")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(success)
                 } else {
-                    Text("请先完成核心权限")
+                    Text(LumaBarL10n.permissionCoreNeeded)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
@@ -575,7 +592,7 @@ struct PermissionOnboardingView: View {
                     HStack(spacing: 6) {
                         Text(permission.title)
                             .font(.system(size: 14, weight: .semibold))
-                        Text(permission.isCore ? "核心" : "可选")
+                        Text(permission.isCore ? LumaBarL10n.permissionCore : LumaBarL10n.permissionOptional)
                             .font(.system(size: 9, weight: .bold))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
@@ -603,7 +620,7 @@ struct PermissionOnboardingView: View {
                         model.request(permission)
                     } label: {
                         Label(
-                            state.isBlocking ? "重试授权" : "授权",
+                            state.isBlocking ? LumaBarL10n.permissionRetry : LumaBarL10n.permissionAuthorize,
                             systemImage: "hand.raised.fill"
                         )
                         .font(.system(size: 12, weight: .semibold))
@@ -617,14 +634,14 @@ struct PermissionOnboardingView: View {
                     Button {
                         model.openSettings(for: permission)
                     } label: {
-                        Label("打开系统设置", systemImage: "gearshape")
+                        Label(LumaBarL10n.permissionOpenSettings, systemImage: "gearshape")
                             .font(.system(size: 12, weight: .medium))
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
 
                     if !permission.isCore {
-                        Button(isSkipped ? "撤销跳过" : "跳过") {
+                        Button(isSkipped ? LumaBarL10n.permissionUnskip : LumaBarL10n.permissionSkip) {
                             if isSkipped {
                                 model.unskip(permission)
                             } else {
@@ -645,7 +662,7 @@ struct PermissionOnboardingView: View {
                     HStack(spacing: 4) {
                         Image(systemName: showGuide ? "chevron.down" : "chevron.right")
                             .font(.system(size: 9, weight: .bold))
-                        Text(showGuide ? "收起指引" : "如何开启？")
+                        Text(showGuide ? LumaBarL10n.permissionHideGuide : LumaBarL10n.permissionShowGuide)
                             .font(.system(size: 11, weight: .medium))
                     }
                     .foregroundStyle(accent.opacity(0.9))
@@ -694,8 +711,8 @@ struct PermissionOnboardingView: View {
     }
 
     private func statusLabel(state: LumaBarPermissionState, skipped: Bool) -> String {
-        if state.isAuthorized { return "已完成" }
-        if skipped { return "已跳过" }
+        if state.isAuthorized { return LumaBarL10n.permissionStateDone }
+        if skipped { return LumaBarL10n.permissionStateSkipped }
         return state.label
     }
 
@@ -765,7 +782,7 @@ struct PermissionOnboardingView: View {
     private var footer: some View {
         VStack(spacing: 10) {
             if !model.allCoreAuthorized {
-                Text("核心权限未完成时仍可进入，但划词 / 音乐同步可能不可用。")
+                Text(LumaBarL10n.permissionCoreWarning)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -781,7 +798,7 @@ struct PermissionOnboardingView: View {
                                 .controlSize(.small)
                                 .frame(maxWidth: .infinity)
                         } else {
-                            Text("一键授权")
+                            Text(LumaBarL10n.permissionRequestAll)
                                 .frame(maxWidth: .infinity)
                         }
                     }

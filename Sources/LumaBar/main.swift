@@ -499,6 +499,27 @@ enum IslandContentMode: String, CaseIterable {
     case token = "Token"
 }
 
+enum AuraOpacityPreference {
+    static let defaultsKey = "auraOpacity"
+    static let didChangeNotification = Notification.Name("LumaBarAuraOpacityDidChange")
+    /// Thin frosted glass by default; slider spans nearly clear → soft frost.
+    static let defaultValue: Double = 0.22
+    static let range: ClosedRange<Double> = 0.0...1.0
+
+    static var current: Double {
+        get { clamped(UserDefaults.standard.object(forKey: defaultsKey) as? Double ?? defaultValue) }
+        set {
+            let value = clamped(newValue)
+            UserDefaults.standard.set(value, forKey: defaultsKey)
+            NotificationCenter.default.post(name: didChangeNotification, object: value)
+        }
+    }
+
+    static func clamped(_ value: Double) -> Double {
+        min(range.upperBound, max(range.lowerBound, value))
+    }
+}
+
 enum IslandTheme: String, CaseIterable {
     case void
     case horizon
@@ -585,7 +606,7 @@ enum IslandTheme: String, CaseIterable {
         case .arcade:
             return "Pup"
         default:
-            return "Desktop companion"
+            return LumaBarL10n.companionSubtitle
         }
     }
 
@@ -648,9 +669,8 @@ enum IslandTheme: String, CaseIterable {
         }
     }
 
-    /// Formerly true for glass themes that used NSVisualEffectView.
-    /// Always false now — backgrounds are hardcoded layer colors only.
-    var usesBackdropMaterial: Bool { false }
+    /// Aura uses real `NSVisualEffectView` frosted glass; other themes stay on fixed layer fills.
+    var usesBackdropMaterial: Bool { self == .aura }
 
     var fontDesign: Font.Design {
         isPixelStyled && !isNook ? .monospaced : .rounded
@@ -772,7 +792,7 @@ enum IslandTheme: String, CaseIterable {
         case .forge:
             return Color(red: 0.212, green: 0.243, blue: 0.204)
         case .aura:
-            return Color.white.opacity(0.42)
+            return Color.white.opacity(0.28)
         }
     }
 
@@ -789,7 +809,7 @@ enum IslandTheme: String, CaseIterable {
         case .forge:
             return Color(red: 0.784, green: 0.745, blue: 0.647)
         case .aura:
-            return Color.white.opacity(0.16)
+            return Color.white.opacity(0.04)
         }
     }
 
@@ -843,7 +863,7 @@ enum IslandTheme: String, CaseIterable {
             return Color.white.opacity(0.48)
         }
         if self == .aura {
-            return Color.white.opacity(0.12)
+            return Color.clear
         }
         return isLight
             ? Color(red: 0.929, green: 0.969, blue: 1.0).opacity(0.82)
@@ -855,7 +875,7 @@ enum IslandTheme: String, CaseIterable {
             return Color.white.opacity(0.52)
         }
         if self == .aura {
-            return Color.white.opacity(0.18)
+            return Color.white.opacity(0.04)
         }
         return isPixelStyled ? pixelControlFill : (isLight ? primaryAccent.opacity(0.12) : Color.white.opacity(0.08))
     }
@@ -870,7 +890,7 @@ enum IslandTheme: String, CaseIterable {
 
     var separatorColor: Color {
         if self == .aura {
-            return Color.white.opacity(0.22)
+            return Color.white.opacity(0.10)
         }
         return isNook
             ? pixelBorder.opacity(0.34)
@@ -936,34 +956,34 @@ enum IslandAppContext: Equatable {
     var agentTitle: String {
         switch self {
         case .coding:
-            return "Code Agent"
+            return LumaBarL10n.agentTitleCode
         case .writing:
-            return "Writing Agent"
+            return LumaBarL10n.agentTitleWriting
         case .reading:
-            return "Reading Agent"
+            return LumaBarL10n.agentTitleReading
         case .gaming:
-            return "Game Agent"
+            return LumaBarL10n.agentTitleGaming
         case .netEase:
-            return "Music Agent"
+            return LumaBarL10n.agentTitleMusic
         case .general:
-            return "AI Agent"
+            return LumaBarL10n.agentTitleGeneral
         }
     }
 
     var label: String {
         switch self {
         case .coding:
-            return "Code"
+            return LumaBarL10n.agentContextCode
         case .writing:
-            return "Writing"
+            return LumaBarL10n.agentContextWriting
         case .reading:
-            return "Reading"
+            return LumaBarL10n.agentContextReading
         case .gaming:
-            return "Gaming"
+            return LumaBarL10n.agentContextGaming
         case .netEase:
-            return "Music"
+            return LumaBarL10n.agentContextMusic
         case .general:
-            return "General"
+            return LumaBarL10n.agentContextGeneral
         }
     }
 
@@ -6197,6 +6217,22 @@ final class IslandPanel: NSPanel {
     /// Compact notch panels keep this false so the glass chrome never flips to the inactive gray path.
     var allowsKeyboardFocus = false
 
+    /// Spaces-friendly chrome: join the active Space’s animation, never pin as a
+    /// stationary / all-Spaces overlay that WindowServer can’t re-snapshot (black square).
+    /// Do **not** use `.canJoinAllSpaces` or `.stationary` on the main island.
+    static let preferredCollectionBehavior: NSWindow.CollectionBehavior = [
+        .moveToActiveSpace,
+        .transient,
+        .fullScreenAuxiliary,
+        .ignoresCycle
+    ]
+
+    /// Must be ≥ statusBar so the island can sit in the menu-bar / camera notch band.
+    /// `mainMenu - 1` is clamped below the menu bar and looks like the island “dropped”.
+    static var preferredLevel: NSWindow.Level {
+        .statusBar
+    }
+
     /// Key only when Agent typing (or similar) needs a first responder.
     override var canBecomeKey: Bool { allowsKeyboardFocus }
     override var canBecomeMain: Bool { false }
@@ -6279,11 +6315,7 @@ final class IslandPanel: NSPanel {
         } else if !becomesKeyOnlyIfNeeded {
             becomesKeyOnlyIfNeeded = true
         }
-        let desiredBehavior: NSWindow.CollectionBehavior = [
-            .canJoinAllSpaces,
-            .fullScreenAuxiliary,
-            .ignoresCycle
-        ]
+        let desiredBehavior = Self.preferredCollectionBehavior
         if collectionBehavior != desiredBehavior {
             collectionBehavior = desiredBehavior
         }
@@ -6293,8 +6325,8 @@ final class IslandPanel: NSPanel {
             }
         }
         if tabbingMode != .disallowed { tabbingMode = .disallowed }
-        if level.rawValue < NSWindow.Level.statusBar.rawValue {
-            level = .statusBar
+        if level != Self.preferredLevel {
+            level = Self.preferredLevel
         }
         installLayerBackedClearContent()
         // Full tree strip is expensive and was spinning the main thread when called
@@ -6576,8 +6608,8 @@ struct VisualEffectBackground: NSViewRepresentable {
 /// Forces `.active` so non-key island panels do not milk into inactive gray.
 struct AuraGlassBackdrop: NSViewRepresentable {
     var cornerRadius: CGFloat = 16
-    /// Prefer the thinnest HUD glass; `.popover` is a touch denser if needed.
-    var material: NSVisualEffectView.Material = .hudWindow
+    /// Ultra-thin see-through glass (user preference: highly transparent Aura).
+    var material: NSVisualEffectView.Material = .underWindowBackground
 
     func makeNSView(context: Context) -> AuraGlassEffectView {
         let view = AuraGlassEffectView()
@@ -6627,7 +6659,7 @@ final class AuraGlassEffectView: NSVisualEffectView {
     }
 
     private func commonInit() {
-        material = .hudWindow
+        material = .underWindowBackground
         blendingMode = .behindWindow
         state = .active
         isEmphasized = true
@@ -6849,11 +6881,7 @@ private func configureIslandWindowChrome(_ window: NSWindow, level: NSWindow.Lev
             panel.styleMask = [.borderless, .fullSizeContentView, .nonactivatingPanel]
             panel.becomesKeyOnlyIfNeeded = true
         }
-        window.collectionBehavior = [
-            .canJoinAllSpaces,
-            .fullScreenAuxiliary,
-            .ignoresCycle
-        ]
+        window.collectionBehavior = IslandPanel.preferredCollectionBehavior
         if #available(macOS 15.0, *) {
             if window.responds(to: Selector(("setAllowsAutomaticWindowTiling:"))) {
                 window.setValue(false, forKey: "allowsAutomaticWindowTiling")
@@ -6863,8 +6891,8 @@ private func configureIslandWindowChrome(_ window: NSWindow, level: NSWindow.Lev
     }
     if let level {
         window.level = level
-    } else if window.level.rawValue < NSWindow.Level.statusBar.rawValue {
-        window.level = .statusBar
+    } else {
+        window.level = IslandPanel.preferredLevel
     }
 }
 
@@ -6960,19 +6988,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     private var persistentIslandWindowLevel: NSWindow.Level {
-        // Above statusBar so Spaces dimming / Mission Control doesn't flatten the glass.
-        let screenSaver = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)))
-        return screenSaver.rawValue >= NSWindow.Level.statusBar.rawValue
-            ? screenSaver
-            : .statusBar
+        IslandPanel.preferredLevel
     }
 
     private var islandWindowCollectionBehavior: NSWindow.CollectionBehavior {
-        [
-            .canJoinAllSpaces,
-            .fullScreenAuxiliary,
-            .ignoresCycle
-        ]
+        IslandPanel.preferredCollectionBehavior
     }
 
     private var desktopPetSize: NSSize {
@@ -6980,11 +7000,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        LumaBarL10n.applyPreferredLanguage()
         AdventureXPixelFont.registerIfNeeded()
         NSApp.setActivationPolicy(.regular)
         terminateDuplicateInstances()
         buildMenu()
         buildStatusItem()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppLanguageDidChange(_:)),
+            name: LumaBarAppLanguage.didChangeNotification,
+            object: nil
+        )
         model.requestExpandedPanelPreservation = { [weak self] bundleIdentifier, duration in
             self?.preserveExpandedPanelForExternalActivation(bundleIdentifier: bundleIdentifier, duration: duration)
         }
@@ -7519,12 +7546,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     private func ensureSpaceTransitionGlassCoverVisible() {
-        setSpaceTransitionGlassCoverVisible(true)
-        // While finger is held between Spaces, keep re-asserting active glass under the cover.
+        // With moveToActiveSpace, WindowServer already composites the island into the
+        // Space swipe. A solid cover is what read as the "black square" — do not paint it
+        // for managed desktop transitions. Still refresh chrome so dirty regions redraw.
         for window in [cameraWindow, leftWindow, rightWindow, expandedWindow] {
             refreshVisualEffectViews(in: window?.contentView)
             if let window {
                 configureIslandWindowChrome(window, level: persistentIslandWindowLevel)
+                window.displayIfNeeded()
             }
         }
     }
@@ -7547,15 +7576,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
     private func beginPreemptiveSpaceTransition() {
         let now = Date()
-        // Already mid-transition (finger hovering between desktops): keep cover + extend watchdog.
+        // Already mid-transition (finger hovering between desktops): extend watchdog only.
         if isSpaceTransitionPending {
             hardHideExpandedAndPetForSpaceTransition()
-            setSpaceTransitionGlassCoverVisible(true)
             armSpaceTransitionWatchdog()
             return
         }
         guard now.timeIntervalSince(lastPreemptiveSpaceTransitionDate) >= 0.2 else {
-            setSpaceTransitionGlassCoverVisible(true)
             return
         }
         lastPreemptiveSpaceTransitionDate = now
@@ -7579,17 +7606,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         spaceTransitionOriginWasFullScreen = isHiddenForFullScreen
             || isFrontmostApplicationFullScreen()
         isSpaceTransitionPending = true
-        // Cover island surfaces before Spaces mid-swipe flicker.
-        setSpaceTransitionGlassCoverVisible(true)
         armSpaceTransitionWatchdog()
         let transitionSettleDuration = fullScreenTransitionDuration + 0.15
         spaceTransitionExpandedHideUntil = now.addingTimeInterval(transitionSettleDuration)
+
+        // Desktop ↔ desktop: keep compact island at alpha 1 so it rides the Space animation.
+        // Full-screen exits still use the dedicated hide path elsewhere.
         if !spaceTransitionOriginWasFullScreen {
-            // Glass themes must stay at alpha 1 — fading out/in causes the gray→clear flash.
-            if model.theme.usesBackdropMaterial {
-                keepIslandWindowsFullyOpaqueForSpaceTransition()
-            } else {
-                animatePanelsOutForSpaceTransition()
+            keepIslandWindowsFullyOpaqueForSpaceTransition()
+            for window in spaceChromeWindows(includeExpanded: false) {
+                window.orderFrontRegardless()
+                window.displayIfNeeded()
             }
         }
 
@@ -7598,7 +7625,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             guard let self, self.isSpaceTransitionPending else { return }
             // Finger still down mid-swipe — do not restore yet or glass flashes gray.
             if self.isSpaceSwipeGestureActive {
-                self.setSpaceTransitionGlassCoverVisible(true)
                 self.armSpaceTransitionWatchdog()
                 return
             }
@@ -7614,7 +7640,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         let workItem = DispatchWorkItem { [weak self] in
             guard let self, self.isSpaceTransitionPending else { return }
             if self.isSpaceSwipeGestureActive {
-                self.setSpaceTransitionGlassCoverVisible(true)
                 self.armSpaceTransitionWatchdog()
                 return
             }
@@ -7894,14 +7919,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             spaceTransitionOriginWasFullScreen = isHiddenForFullScreen
             isSpaceTransitionPending = true
             hardHideExpandedAndPetForSpaceTransition()
-            setSpaceTransitionGlassCoverVisible(true)
             armSpaceTransitionWatchdog()
             if !spaceTransitionOriginWasFullScreen {
-                if model.theme.usesBackdropMaterial {
-                    keepIslandWindowsFullyOpaqueForSpaceTransition()
-                } else {
-                    animatePanelsOutForSpaceTransition()
-                }
+                keepIslandWindowsFullyOpaqueForSpaceTransition()
             }
         }
         spaceTransitionExpandedHideUntil = max(
@@ -8600,12 +8620,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         panel.animationBehavior = .none
         panel.alphaValue = 1
         panel.title = title
-        let resolvedLevel = level ?? .statusBar
+        let resolvedLevel = level ?? IslandPanel.preferredLevel
         configureIslandWindowChrome(panel, level: resolvedLevel)
-        // Prefer the higher of statusBar and any caller-provided persistent level.
-        if let level, level.rawValue > panel.level.rawValue {
-            panel.level = level
-        }
+        panel.level = resolvedLevel
+        panel.collectionBehavior = IslandPanel.preferredCollectionBehavior
         panel.contentView = FirstMouseHostingView(rootView: rootView)
         // Force an immediate layout/display pass so glass is ready before first Spaces swipe.
         panel.contentView?.layoutSubtreeIfNeeded()
@@ -8637,7 +8655,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     private func buildDesktopPetWindow() {
         desktopPetWindow = makePanel(
             frame: desktopPetFrame(),
-            title: "Desktop Companion",
+            title: LumaBarL10n.companionTitle,
             rootView: makeDesktopPetView()
             .frame(width: desktopPetSize.width, height: desktopPetSize.height)
             .preferredColorScheme(model.theme.preferredColorScheme)
@@ -8919,7 +8937,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         guard let window = fullScreenCompletionToastWindow else { return }
         fullScreenCompletionToastDismissWorkItem?.cancel()
         window.level = persistentIslandWindowLevel
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        window.collectionBehavior = islandWindowCollectionBehavior
+        // Never pin toasts as stationary — same Spaces black-square class of bug.
+        // Toast still follows the active Space via moveToActiveSpace.
         window.alphaValue = 0
         window.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { context in
@@ -9502,6 +9522,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         menuBuilder.target = self
         NSApp.mainMenu = menuBuilder.makeApplicationMenu()
         menuBuilder.updateThemeState(model.theme)
+        menuBuilder.updateLanguageState(LumaBarAppLanguage.current)
         menuBuilder.updatePanelVisibility(isExpanded: model.isExpanded)
     }
 
@@ -9522,6 +9543,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         item.menu = menuBuilder.makeStatusMenu()
         statusItem = item
         menuBuilder.updateThemeState(model.theme)
+        menuBuilder.updateLanguageState(LumaBarAppLanguage.current)
         menuBuilder.updatePanelVisibility(isExpanded: model.isExpanded)
     }
 
@@ -9542,7 +9564,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             copyright: copyright
         )
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: LumaBarL10n.aboutOK)
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }
@@ -9557,6 +9579,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
     @objc func showPermissionSetupFromMenu() {
         showPermissionOnboarding()
+    }
+
+    @objc func selectAppLanguage(_ sender: NSMenuItem) {
+        let languages = LumaBarAppLanguage.allCases
+        if sender.tag >= 0, sender.tag < languages.count {
+            applyAppLanguage(languages[sender.tag])
+            return
+        }
+        if let raw = sender.representedObject as? String,
+           let language = LumaBarAppLanguage(rawValue: raw)
+        {
+            applyAppLanguage(language)
+            return
+        }
+    }
+
+    private func applyAppLanguage(_ language: LumaBarAppLanguage) {
+        LumaBarAppLanguage.setCurrent(language)
+        // Apply immediately even if notification delivery is delayed.
+        rebuildLocalizedChrome()
+    }
+
+    @objc private func handleAppLanguageDidChange(_ notification: Notification) {
+        rebuildLocalizedChrome()
+    }
+
+    private func rebuildLocalizedChrome() {
+        buildMenu()
+        if let statusItem {
+            menuBuilder.target = self
+            statusItem.menu = menuBuilder.makeStatusMenu()
+            menuBuilder.updateThemeState(model.theme)
+            menuBuilder.updateLanguageState(LumaBarAppLanguage.current)
+            menuBuilder.updatePanelVisibility(isExpanded: model.isExpanded)
+            statusItem.button?.toolTip = LumaBarL10n.appName
+        }
+        HelpGuidePresenter.reloadForLanguageChange()
+        if permissionWindow != nil {
+            permissionWindow?.title = LumaBarL10n.permissionWindowTitle
+            let allowsAutoFinish = !PermissionOnboardingModel.hasCompletedSetup
+            let onboardingModel = PermissionOnboardingModel(
+                onFinished: { [weak self] in
+                    self?.finishPermissionOnboarding()
+                },
+                allowsAutoFinish: allowsAutoFinish
+            )
+            onboardingModel.onPermissionBecameAuthorized = { [weak self] permission in
+                self?.handlePermissionBecameAuthorized(permission)
+            }
+            onboardingModel.onSoftReminder = { [weak self] message in
+                self?.model.requestDesktopPetMessage?(message)
+            }
+            permissionOnboardingModel = onboardingModel
+            permissionWindow?.contentView = NSHostingView(
+                rootView: PermissionOnboardingView(model: onboardingModel)
+            )
+        }
+        model.refreshLocalizedChromeAfterLanguageChange()
+        model.objectWillChange.send()
+        relayoutExpandedPanelIfNeeded()
+    }
+
+    @objc private func handleAuraOpacityDidChange(_ notification: Notification) {
+        model.objectWillChange.send()
+        for window in [cameraWindow, leftWindow, rightWindow, expandedWindow] {
+            window?.contentView?.needsDisplay = true
+            window?.viewsNeedDisplay = true
+        }
     }
 
     @objc func selectVoidTheme() {
@@ -9642,9 +9732,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             return
         }
 
-        let onboardingModel = PermissionOnboardingModel { [weak self] in
-            self?.finishPermissionOnboarding()
-        }
+        // After first-run completion, keep the panel open until the user closes it —
+        // never auto-dismiss when reopened from the menu.
+        let allowsAutoFinish = !PermissionOnboardingModel.hasCompletedSetup
+        let onboardingModel = PermissionOnboardingModel(
+            onFinished: { [weak self] in
+                self?.finishPermissionOnboarding()
+            },
+            allowsAutoFinish: allowsAutoFinish
+        )
         onboardingModel.onPermissionBecameAuthorized = { [weak self] permission in
             self?.handlePermissionBecameAuthorized(permission)
         }
@@ -9658,7 +9754,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             backing: .buffered,
             defer: false
         )
-        window.title = "权限引导"
+        window.title = LumaBarL10n.permissionWindowTitle
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.moveToActiveSpace]
@@ -9674,6 +9770,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     private func finishPermissionOnboarding() {
+        permissionWindow?.contentView = nil
         permissionWindow?.orderOut(nil)
         permissionWindow = nil
         permissionOnboardingModel = nil
@@ -9687,11 +9784,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                 removeSelectionTranslationMonitor()
                 installSelectionTranslationMonitor()
             }
-            model.requestDesktopPetMessage?("辅助功能已生效，划词翻译可以用了。")
+            model.requestDesktopPetMessage?(LumaBarL10n.permissionAccessibilityGranted)
         case .automation:
-            model.requestDesktopPetMessage?("自动化已授权，音乐同步可以工作了。")
+            model.requestDesktopPetMessage?(LumaBarL10n.permissionAutomationGranted)
         case .screenRecording:
-            model.requestDesktopPetMessage?("屏幕录制已授权，截图分析可用。")
+            model.requestDesktopPetMessage?(LumaBarL10n.permissionScreenGranted)
         }
     }
 
@@ -9712,7 +9809,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         refreshInteractiveHitRegions()
 
         if announce {
-            model.requestDesktopPetMessage?("权限已更新，内容正在刷新。")
+            model.requestDesktopPetMessage?(LumaBarL10n.permissionUpdated)
         }
     }
 
@@ -9761,9 +9858,9 @@ enum IslandMusicLibrarySource: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .local: return "本地"
-        case .appleMusic: return "Apple Music"
-        case .netEase: return "网易云"
+        case .local: return LumaBarL10n.libraryLocal
+        case .appleMusic: return LumaBarL10n.libraryAppleMusic
+        case .netEase: return LumaBarL10n.libraryNetEase
         }
     }
 }
@@ -10537,7 +10634,7 @@ struct LocalTrack: Identifiable, Hashable {
 
     var displayArtist: String {
         if artist.isEmpty {
-            return "Local file"
+            return LumaBarL10n.libraryLocalFile
         }
         return artist
     }
@@ -10739,12 +10836,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     /// User manually picked a library channel — polling / frontmost-app heuristics must not steal it.
     private var musicSourceUserLocked = false
     @Published var isScanning = false
-    @Published var scanMessage = "Scanning local music"
+    @Published var scanMessage = LumaBarL10n.scanScanning
     @Published var position: TimeInterval = 0
     @Published var duration: TimeInterval = 0
     @Published var agentInput = ""
-    @Published var agentResponse = "Ready."
-    @Published var agentStatus = "Ready"
+    @Published var agentResponse = LumaBarL10n.agentReadyDetail
+    @Published var agentStatus = LumaBarL10n.agentReady
     @Published var agentAPIKeyDraft = ""
     @Published var agentHasAPIKey = AgentCredentialStore.currentAPIKey() != nil
     @Published var isAgentStreaming = false
@@ -11006,24 +11103,40 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         activeAppContext.icon
     }
 
+    func refreshLocalizedChromeAfterLanguageChange() {
+        guard !isAgentStreaming, !isAgentShellRunning, !isVoiceWhisperRecording, !isVoiceWhisperFinalizing else {
+            objectWillChange.send()
+            return
+        }
+        // Idle chrome must always track the active UI language (status + detail together).
+        if agentHasAPIKey {
+            agentStatus = LumaBarL10n.agentReady
+            agentResponse = LumaBarL10n.agentReadyDetail
+        } else {
+            agentStatus = LumaBarL10n.agentAPIKeyNeeded
+            agentResponse = LumaBarL10n.agentConfigureKey(AgentModelProvider.current.displayName)
+        }
+        objectWillChange.send()
+    }
+
     var agentInputPlaceholder: String {
         if isAgentShellRequestMode {
-            return "Describe shell task, then press Return"
+            return LumaBarL10n.agentPlaceholderShell
         }
 
         switch activeAppContext {
         case .coding:
-            return "Ask about code or generate a command"
+            return LumaBarL10n.agentPlaceholderCode
         case .writing:
-            return "Rewrite, expand, or refine"
+            return LumaBarL10n.agentPlaceholderWriting
         case .reading:
-            return "Ask about this page or document"
+            return LumaBarL10n.agentPlaceholderReading
         case .gaming:
-            return "Ask about a game, item, or build"
+            return LumaBarL10n.agentPlaceholderGaming
         case .netEase:
-            return "Control music naturally"
+            return LumaBarL10n.agentPlaceholderMusic
         case .general:
-            return "Message"
+            return LumaBarL10n.agentPlaceholderGeneral
         }
     }
 
@@ -11035,45 +11148,45 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         switch activeAppContext {
         case .coding:
             return [
-                AgentQuickAction(kind: .explainCode, title: "Explain", icon: "text.magnifyingglass"),
-                AgentQuickAction(kind: .refactorCode, title: "Refactor", icon: "wand.and.stars"),
-                AgentQuickAction(kind: .commentCode, title: "Comment", icon: "text.bubble"),
-                AgentQuickAction(kind: .shell, title: "Shell", icon: "terminal")
+                AgentQuickAction(kind: .explainCode, title: LumaBarL10n.quickExplain, icon: "text.magnifyingglass"),
+                AgentQuickAction(kind: .refactorCode, title: LumaBarL10n.quickRefactor, icon: "wand.and.stars"),
+                AgentQuickAction(kind: .commentCode, title: LumaBarL10n.quickComment, icon: "text.bubble"),
+                AgentQuickAction(kind: .shell, title: LumaBarL10n.quickShell, icon: "terminal")
             ]
         case .writing:
             return [
-                AgentQuickAction(kind: .professionalWriting, title: "Professional", icon: "briefcase"),
-                AgentQuickAction(kind: .simplifyWriting, title: "Simplify", icon: "textformat.size.smaller"),
-                AgentQuickAction(kind: .proofreadWriting, title: "Proofread", icon: "checkmark.seal"),
-                AgentQuickAction(kind: .outlineWriting, title: "Outline", icon: "list.bullet.indent")
+                AgentQuickAction(kind: .professionalWriting, title: LumaBarL10n.quickProfessional, icon: "briefcase"),
+                AgentQuickAction(kind: .simplifyWriting, title: LumaBarL10n.quickSimplify, icon: "textformat.size.smaller"),
+                AgentQuickAction(kind: .proofreadWriting, title: LumaBarL10n.quickProofread, icon: "checkmark.seal"),
+                AgentQuickAction(kind: .outlineWriting, title: LumaBarL10n.quickOutline, icon: "list.bullet.indent")
             ]
         case .reading:
             return [
-                AgentQuickAction(kind: .summarizePage, title: "TL;DR", icon: "text.alignleft"),
-                AgentQuickAction(kind: .keyTakeaways, title: "Key Points", icon: "key.fill"),
-                AgentQuickAction(kind: .explainConcept, title: "Explain", icon: "questionmark.circle"),
-                AgentQuickAction(kind: .shell, title: "Shell", icon: "terminal")
+                AgentQuickAction(kind: .summarizePage, title: LumaBarL10n.quickTLDR, icon: "text.alignleft"),
+                AgentQuickAction(kind: .keyTakeaways, title: LumaBarL10n.quickKeyPoints, icon: "key.fill"),
+                AgentQuickAction(kind: .explainConcept, title: LumaBarL10n.quickExplain, icon: "questionmark.circle"),
+                AgentQuickAction(kind: .shell, title: LumaBarL10n.quickShell, icon: "terminal")
             ]
         case .gaming:
             return [
-                AgentQuickAction(kind: .gameGuide, title: "Guide", icon: "map"),
-                AgentQuickAction(kind: .gameBuild, title: "Build", icon: "hammer"),
-                AgentQuickAction(kind: .gameScreenshot, title: "Screen", icon: "viewfinder"),
-                AgentQuickAction(kind: .gameMusic, title: "Music", icon: "music.note")
+                AgentQuickAction(kind: .gameGuide, title: LumaBarL10n.quickGuide, icon: "map"),
+                AgentQuickAction(kind: .gameBuild, title: LumaBarL10n.quickBuild, icon: "hammer"),
+                AgentQuickAction(kind: .gameScreenshot, title: LumaBarL10n.quickScreen, icon: "viewfinder"),
+                AgentQuickAction(kind: .gameMusic, title: LumaBarL10n.modeMusic, icon: "music.note")
             ]
         case .netEase:
             return [
                 AgentQuickAction(kind: .playPause, title: displayedIsPlaying ? "Pause" : "Play", icon: displayedIsPlaying ? "pause.fill" : "play.fill"),
-                AgentQuickAction(kind: .nextTrack, title: "Next", icon: "forward.fill"),
-                AgentQuickAction(kind: .gameMusic, title: "Mood", icon: "music.note.list"),
-                AgentQuickAction(kind: .system, title: "System", icon: "cpu")
+                AgentQuickAction(kind: .nextTrack, title: LumaBarL10n.quickNext, icon: "forward.fill"),
+                AgentQuickAction(kind: .gameMusic, title: LumaBarL10n.quickMood, icon: "music.note.list"),
+                AgentQuickAction(kind: .system, title: LumaBarL10n.modeSystem, icon: "cpu")
             ]
         case .general:
             return [
-                AgentQuickAction(kind: .system, title: "System", icon: "cpu"),
+                AgentQuickAction(kind: .system, title: LumaBarL10n.modeSystem, icon: "cpu"),
                 AgentQuickAction(kind: .playPause, title: displayedIsPlaying ? "Pause" : "Play", icon: displayedIsPlaying ? "pause.fill" : "play.fill"),
-                AgentQuickAction(kind: .nextTrack, title: "Next", icon: "forward.fill"),
-                AgentQuickAction(kind: .shell, title: "Shell", icon: "terminal")
+                AgentQuickAction(kind: .nextTrack, title: LumaBarL10n.quickNext, icon: "forward.fill"),
+                AgentQuickAction(kind: .shell, title: LumaBarL10n.quickShell, icon: "terminal")
             ]
         }
     }
@@ -11195,19 +11308,19 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var externalTokenAccessibilityLabel: String {
-        (codexTokenUsage?.source ?? activeExternalTokenSource)?.accessibilityLabel ?? "AI token usage"
+        (codexTokenUsage?.source ?? activeExternalTokenSource)?.accessibilityLabel ?? LumaBarL10n.agentAITokenUsage
     }
 
     var agentTokenStateText: String {
         if usesExternalTokenDisplay {
             let source = codexTokenUsage?.source ?? activeExternalTokenSource
             return codexTokenUsage == nil
-                ? (source?.readingLabel ?? "Reading context")
-                : "Current context"
+                ? (source?.readingLabel ?? LumaBarL10n.agentReadingContext)
+                : LumaBarL10n.agentCurrentContext
         }
-        if isAgentStreaming { return "Thinking" }
-        if agentTokenUsage.totalTokens > 0 { return "Last request" }
-        return agentHasAPIKey ? "Ready" : "API key needed"
+        if isAgentStreaming { return LumaBarL10n.agentThinking }
+        if agentTokenUsage.totalTokens > 0 { return LumaBarL10n.agentLastRequest }
+        return agentHasAPIKey ? LumaBarL10n.agentReady : LumaBarL10n.agentAPIKeyNeeded
     }
 
     var agentTokenSummaryText: String {
@@ -11227,20 +11340,20 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var compactAgentTitle: String {
-        isAgentStreaming ? "\(AgentModelProvider.current.displayName) Streaming" : activeAppContext.agentTitle
+        isAgentStreaming ? LumaBarL10n.agentStreaming(AgentModelProvider.current.displayName) : activeAppContext.agentTitle
     }
 
     var compactAgentSubtitle: String {
         if isVoiceWhisperRecording {
-            return "Voice input"
+            return LumaBarL10n.agentVoiceInput
         }
         if isAgentShellRunning {
-            return "Running command"
+            return LumaBarL10n.agentRunningCommand
         }
         if isAgentStreaming {
-            return agentResponse.isEmpty ? "Connecting" : "Writing"
+            return agentResponse.isEmpty ? LumaBarL10n.agentConnecting : LumaBarL10n.agentWriting
         }
-        return agentHasAPIKey ? agentStatus : "API key needed"
+        return agentHasAPIKey ? agentStatus : LumaBarL10n.agentAPIKeyNeeded
     }
 
     var desktopPetMoodMessage: String? {
@@ -11352,7 +11465,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 ? netEaseNowPlaying.artist
                 : "\(netEaseNowPlaying.artist) • \(netEaseNowPlaying.album)"
         }
-        return currentTrack?.displaySubtitle ?? "Local library"
+        return currentTrack?.displaySubtitle ?? LumaBarL10n.libraryLocalSubtitle
     }
 
     var displayedArtworkData: Data? {
@@ -11507,12 +11620,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             return scanMessage
         case .appleMusic:
             if appleMusicNowPlaying != nil {
-                return "正在通过 Apple Music（Music.app）播放"
+                return LumaBarL10n.appleMusicPlaying
             }
-            return "在 Music.app 中播放歌曲后，将显示在这里"
+            return LumaBarL10n.appleMusicEmpty
         case .local:
             return Self.localPlayableTracks(from: tracks).isEmpty
-                ? (scanMessage.isEmpty ? "没有本地歌曲" : scanMessage)
+                ? (scanMessage.isEmpty ? LumaBarL10n.noLocalSongs : scanMessage)
                 : ""
         }
     }
@@ -11665,7 +11778,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     func scanLocalMusic() {
         isScanning = true
-        scanMessage = "Scanning local and NetEase music"
+        scanMessage = LumaBarL10n.scanScanningAll
 
 #if LUMA_APP_STORE
         // Sandbox: only scan a user-granted music folder; never probe NetEase containers.
@@ -11674,7 +11787,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             netEasePlaylists = []
             currentIndex = 0
             isScanning = false
-            scanMessage = "Grant a music folder to scan local tracks"
+            scanMessage = LumaBarL10n.scanGrantFolder
             return
         }
         let started = musicRoot.startAccessingSecurityScopedResource()
@@ -11694,7 +11807,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             self.netEasePlaylists = []
             self.currentIndex = 0
             self.isScanning = false
-            self.scanMessage = discovered.isEmpty ? "No music found" : "\(discovered.count) tracks found"
+            self.scanMessage = discovered.isEmpty ? LumaBarL10n.scanNone : LumaBarL10n.scanFound(discovered.count)
             self.prepareCurrentTrack()
         }
 #else
@@ -11713,7 +11826,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             self.netEasePlaylists = result.1
             self.currentIndex = 0
             self.isScanning = false
-            self.scanMessage = result.0.isEmpty ? "No music found" : "\(result.0.count) tracks found"
+            self.scanMessage = result.0.isEmpty ? LumaBarL10n.scanNone : LumaBarL10n.scanFound(result.0.count)
             self.refreshMissingNetEasePlaylistCovers()
             self.prepareCurrentTrack()
         }
@@ -14800,7 +14913,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         isSelectionTranslationActive = false
         isAgentStreaming = false
         agentLiveEstimatedTokens = 0
-        agentStatus = "Ready"
+        agentStatus = LumaBarL10n.agentReady
         agentResponse = ""
         isExpanded = false
     }
@@ -15380,7 +15493,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         isAgentShellConfirmationPending = false
         pendingAgentShellCommand = nil
         agentInput = ""
-        agentStatus = "Shell request"
+        agentStatus = LumaBarL10n.agentShellRequest
         agentResponse = "Describe what you want to run. Press Return to generate and execute one zsh command."
         agentFocusRequestID = UUID()
     }
@@ -15402,8 +15515,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         pendingAgentShellCommand = nil
         voiceWhisperTranscript = ""
         agentInput = ""
-        agentStatus = "正在聆听"
-        agentResponse = "正在聆听。说完后再次按 ⌘⇧M。"
+        agentStatus = LumaBarL10n.voiceListening
+        agentResponse = LumaBarL10n.voiceListeningDetail
         agentFocusRequestID = UUID()
         requestSpeechRecognitionAccess()
     }
@@ -15411,13 +15524,13 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     func finishVoiceWhisper() {
         guard isVoiceWhisperRecording, !isVoiceWhisperFinalizing else { return }
         isVoiceWhisperFinalizing = true
-        agentStatus = "正在转写"
-        agentResponse = "正在完成中文语音转写…"
+        agentStatus = LumaBarL10n.voiceTranscribing
+        agentResponse = LumaBarL10n.voiceTranscribingDetail
         voiceAudioSession?.finishRecognition()
 
         if let finalizationTimeout = voiceAudioSession?.finalizationTimeout {
             let workItem = DispatchWorkItem { [weak self] in
-                self?.failVoiceWhisper("语音转写超时，请重试。")
+                self?.failVoiceWhisper(LumaBarL10n.voiceTimeout)
             }
             voiceWhisperFinalizationWorkItem = workItem
             DispatchQueue.main.asyncAfter(deadline: .now() + finalizationTimeout, execute: workItem)
@@ -15429,8 +15542,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         case .authorized:
             requestMicrophoneAccess()
         case .notDetermined:
-            agentStatus = "需要语音权限"
-            agentResponse = "即将请求语音识别权限，请在弹窗中点「好」。"
+            agentStatus = LumaBarL10n.voiceNeedSpeech
+            agentResponse = LumaBarL10n.voiceNeedSpeechDetail
             VoiceWhisperPermissionBroker.requestSpeechAuthorization { [weak self] status in
                 DispatchQueue.main.async { [weak self] in
                     self?.handleSpeechAuthorization(status)
@@ -15438,12 +15551,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             }
         case .denied, .restricted:
             finishVoiceWhisperWithPermissionError(
-                status: "语音识别未授权",
+                status: LumaBarL10n.voiceSpeechDenied,
                 openPrivacyPane: .speechRecognition
             )
         @unknown default:
             isVoiceWhisperRecording = false
-            agentStatus = "语音识别不可用"
+            agentStatus = LumaBarL10n.voiceSpeechUnavailable
             agentResponse = VoiceWhisperError.speechUnavailable.localizedDescription
         }
     }
@@ -15453,7 +15566,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             requestMicrophoneAccess()
         } else {
             finishVoiceWhisperWithPermissionError(
-                status: "语音识别未授权",
+                status: LumaBarL10n.voiceSpeechDenied,
                 openPrivacyPane: .speechRecognition
             )
         }
@@ -15464,8 +15577,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         case .authorized:
             startVoiceWhisperAudio()
         case .notDetermined:
-            agentStatus = "需要麦克风权限"
-            agentResponse = "即将请求麦克风权限，请在弹窗中点「好」。"
+            agentStatus = LumaBarL10n.voiceNeedMic
+            agentResponse = LumaBarL10n.voiceNeedMicDetail
             VoiceWhisperPermissionBroker.requestMicrophoneAccess { [weak self] granted in
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
@@ -15473,7 +15586,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                         self.startVoiceWhisperAudio()
                     } else {
                         self.finishVoiceWhisperWithPermissionError(
-                            status: "麦克风未授权",
+                            status: LumaBarL10n.voiceMicDenied,
                             openPrivacyPane: .microphone
                         )
                     }
@@ -15481,11 +15594,11 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             }
         case .denied, .restricted:
             finishVoiceWhisperWithPermissionError(
-                status: "麦克风未授权",
+                status: LumaBarL10n.voiceMicDenied,
                 openPrivacyPane: .microphone
             )
         @unknown default:
-            finishVoiceWhisperWithPermissionError(status: "麦克风不可用")
+            finishVoiceWhisperWithPermissionError(status: LumaBarL10n.voiceMicUnavailable)
         }
     }
 
@@ -15503,13 +15616,13 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         agentStatus = status
         switch openPrivacyPane {
         case .microphone:
-            agentResponse = "请在「系统设置 → 隐私与安全性 → 麦克风」中打开 luma bar，然后重试 Voice Whisper。"
+            agentResponse = LumaBarL10n.voiceOpenMicSettings
             Self.openSystemPrivacySettings(pane: .microphone)
         case .speechRecognition:
-            agentResponse = "请在「系统设置 → 隐私与安全性 → 语音识别」中打开 luma bar，然后重试 Voice Whisper。"
+            agentResponse = LumaBarL10n.voiceOpenSpeechSettings
             Self.openSystemPrivacySettings(pane: .speechRecognition)
         case nil:
-            agentResponse = "请在「系统设置 → 隐私与安全性」中允许麦克风和语音识别，然后重试。"
+            agentResponse = LumaBarL10n.voiceOpenPrivacySettings
         }
     }
 
@@ -15557,7 +15670,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 onStatus: { [weak self] message in
                     DispatchQueue.main.async { [weak self] in
                         guard let self, self.isVoiceWhisperRecording else { return }
-                        self.agentStatus = "中文语音模型"
+                        self.agentStatus = LumaBarL10n.agentChineseSpeechModel
                         self.agentResponse = message
                     }
                 }
@@ -15565,7 +15678,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         } else {
             guard let recognizer = voiceSpeechRecognizer, recognizer.isAvailable else {
                 isVoiceWhisperRecording = false
-                agentStatus = "语音识别不可用"
+                agentStatus = LumaBarL10n.voiceSpeechUnavailable
                 agentResponse = VoiceWhisperError.speechUnavailable.localizedDescription
                 return
             }
@@ -15578,7 +15691,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         #else
         guard let recognizer = voiceSpeechRecognizer, recognizer.isAvailable else {
             isVoiceWhisperRecording = false
-            agentStatus = "语音识别不可用"
+            agentStatus = LumaBarL10n.voiceSpeechUnavailable
             agentResponse = VoiceWhisperError.speechUnavailable.localizedDescription
             return
         }
@@ -15594,14 +15707,14 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         } catch {
             audioSession.stop()
             isVoiceWhisperRecording = false
-            agentStatus = "麦克风错误"
+            agentStatus = LumaBarL10n.voiceMicError
             agentResponse = error.localizedDescription
             return
         }
 
         voiceAudioSession = audioSession
         isVoiceWhisperRecording = true
-        agentStatus = "正在聆听"
+        agentStatus = LumaBarL10n.voiceListening
         requestDesktopPetMessage?(desktopPetMoodMessage ?? "我在听，讲完再按 ⌘⇧M。")
     }
 
@@ -15610,15 +15723,15 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         voiceWhisperTranscript = transcript
         agentInput = transcript
         if isVoiceWhisperFinalizing {
-            agentStatus = "正在转写"
+            agentStatus = LumaBarL10n.voiceTranscribing
             agentResponse = transcript.isEmpty
-                ? "正在完成中文语音转写…"
-                : "正在完成中文语音转写…\n\n\(transcript)"
+                ? LumaBarL10n.voiceTranscribingDetail
+                : "\(LumaBarL10n.voiceTranscribingDetail)\n\n\(transcript)"
         } else {
-            agentStatus = isFinal ? "语音已就绪" : "正在聆听"
+            agentStatus = isFinal ? LumaBarL10n.voiceReady : LumaBarL10n.voiceListening
             agentResponse = transcript.isEmpty
-                ? "正在聆听。说完后再次按 ⌘⇧M。"
-                : "正在聆听…\n\n\(transcript)"
+                ? LumaBarL10n.voiceListeningDetail
+                : "\(LumaBarL10n.voiceListening)\n\n\(transcript)"
         }
         if isFinal {
             completeVoiceWhisperTranscription()
@@ -15634,7 +15747,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
         isVoiceWhisperRecording = false
         stopVoiceWhisperAudio()
-        agentStatus = "语音错误"
+        agentStatus = LumaBarL10n.voiceError
         agentResponse = message
     }
 
@@ -15645,13 +15758,13 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         stopVoiceWhisperAudio()
 
         guard !transcript.isEmpty else {
-            agentStatus = "没有识别到语音"
-            agentResponse = "没有听到可用的语音内容，请重试。"
+            agentStatus = LumaBarL10n.voiceNoSpeech
+            agentResponse = LumaBarL10n.voiceNoSpeechDetail
             return
         }
 
         agentInput = transcript
-        agentStatus = "语音已就绪"
+        agentStatus = LumaBarL10n.voiceReady
         agentResponse = transcript
         agentFocusRequestID = UUID()
     }
@@ -15680,10 +15793,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             agentAPIKeyDraft = ""
             agentHasAPIKey = true
             let provider = AgentModelProvider.current.displayName
-            agentStatus = "\(provider) key saved"
+            agentStatus = LumaBarL10n.agentKeySaved(provider)
             agentResponse = "\(provider) API Key 已安全保存。"
         } catch {
-            agentStatus = "Key save failed"
+            agentStatus = LumaBarL10n.agentKeySaveFailed
             agentResponse = error.localizedDescription
         }
     }
@@ -15694,10 +15807,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         agentHasAPIKey = AgentCredentialStore.currentAPIKey() != nil
         let provider = AgentModelProvider.current.displayName
         if agentHasAPIKey {
-            agentStatus = "Using built-in \(provider)"
+            agentStatus = LumaBarL10n.agentUsingBuiltin(provider)
             agentResponse = "已改回内置 \(provider) 密钥。"
         } else {
-            agentStatus = "\(provider) key cleared"
+            agentStatus = LumaBarL10n.agentKeyCleared(provider)
             agentResponse = "\(provider) API Key 已清除。"
         }
     }
@@ -15707,12 +15820,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             .trimmingCharacters(in: .whitespacesAndNewlines),
               !pasted.isEmpty
         else {
-            agentStatus = "Clipboard empty"
+            agentStatus = LumaBarL10n.agentClipboardEmpty
             return
         }
 
         agentAPIKeyDraft = pasted
-        agentStatus = "Key pasted"
+        agentStatus = LumaBarL10n.agentKeyPasted
     }
 
     func clearAgentOutput() {
@@ -15727,10 +15840,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         isMessageConfirmationPending = false
         isAgentShellConfirmationPending = false
         isAgentShellRequestMode = false
-        agentStatus = agentHasAPIKey ? "Ready" : "API key needed"
+        agentStatus = agentHasAPIKey ? LumaBarL10n.agentReady : LumaBarL10n.agentAPIKeyNeeded
         agentResponse = agentHasAPIKey
-            ? "Ready."
-            : "请配置 \(AgentModelProvider.current.displayName) API Key，或注入内置密钥。"
+            ? LumaBarL10n.agentReadyDetail
+            : LumaBarL10n.agentConfigureKey(AgentModelProvider.current.displayName)
     }
 
     func cancelAgentRequest() {
@@ -15743,7 +15856,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         isAgentShellRequestMode = false
         pendingMessageAction = nil
         isMessageConfirmationPending = false
-        agentStatus = "Canceled"
+        agentStatus = LumaBarL10n.agentCanceled
     }
 
     func runAgentQuickCommand(_ command: String) {
@@ -15783,10 +15896,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             runAgentQuickCommand("下一首")
         case .shell:
             agentInput = "shell: "
-            agentStatus = "Shell"
+            agentStatus = LumaBarL10n.agentShell
         case .gameMusic:
             agentInput = "播放一点适合打游戏的电子乐"
-            agentStatus = "Music"
+            agentStatus = LumaBarL10n.modeMusic
         case .gameGuide:
             runContextAction(
                 kind,
@@ -15953,7 +16066,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         fetchPageText: Bool = false,
         captureScreenshot: Bool = false
     ) {
-        agentStatus = "Reading selection"
+        agentStatus = LumaBarL10n.agentReadingSelection
         var context = captureAgentContext(includeFocusedText: true)
 
         if let selectedText = meaningfulSelectedText(context.selectedText) {
@@ -15977,7 +16090,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 )
             } else if kind == .gameGuide || kind == .gameBuild {
                 agentInput = kind == .gameGuide ? "查询游戏攻略：" : "查询游戏配装："
-                agentStatus = "Gaming"
+                agentStatus = LumaBarL10n.agentContextGaming
             } else {
                 completeAgentLocalResponse(
                     status: "No selection",
@@ -16066,8 +16179,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
         guard let apiKey = AgentCredentialStore.currentAPIKey() else {
             agentHasAPIKey = false
-            agentStatus = "API key needed"
-            agentResponse = "请先配置 \(AgentModelProvider.current.displayName) API Key，或在构建时注入内置密钥。"
+            agentStatus = LumaBarL10n.agentAPIKeyNeeded
+            agentResponse = LumaBarL10n.agentConfigureKeyFirst(AgentModelProvider.current.displayName)
             return
         }
 
@@ -16081,9 +16194,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         isAgentStreaming = true
         agentLiveEstimatedTokens = 0
         if purpose == .translation {
-            agentStatus = "Translating"
+            agentStatus = LumaBarL10n.agentTranslating
         } else {
-            agentStatus = captureScreenshot ? "Capturing" : (fetchPageText ? "Reading" : "Connecting")
+            agentStatus = captureScreenshot ? LumaBarL10n.agentCapturing : (fetchPageText ? LumaBarL10n.agentContextReading : LumaBarL10n.agentConnecting)
         }
         agentResponse = ""
         if purpose == .shellCommand {
@@ -16113,7 +16226,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 )
                 let estimatedInputTokens = max(1, contextualPrompt.utf8.count / 4)
                 self.agentLiveEstimatedTokens = estimatedInputTokens
-                self.agentStatus = purpose == .translation ? "Translating" : "Connecting"
+                self.agentStatus = purpose == .translation ? LumaBarL10n.agentTranslating : LumaBarL10n.agentConnecting
 
                 let usage = try await AgentLLMClient.stream(
                     prompt: contextualPrompt,
@@ -16127,7 +16240,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                         self.agentResponse += delta
                         self.agentLiveEstimatedTokens = estimatedInputTokens
                             + max(1, self.agentResponse.utf8.count / 4)
-                        self.agentStatus = purpose == .translation ? "Translating" : "Streaming"
+                        self.agentStatus = purpose == .translation ? LumaBarL10n.agentTranslating : LumaBarL10n.agentStreamingStatus
                     }
                 }
 
@@ -16140,11 +16253,11 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                     }
                     let elapsed = Date().timeIntervalSince(startedAt)
                     if self.agentResponse.isEmpty {
-                        self.agentStatus = "No output"
+                        self.agentStatus = LumaBarL10n.agentNoOutput
                     } else if purpose == .translation {
-                        self.agentStatus = "Translated \(String(format: "%.1fs", elapsed))"
+                        self.agentStatus = LumaBarL10n.agentTranslated(elapsed)
                     } else {
-                        self.agentStatus = "Done \(String(format: "%.1fs", elapsed))"
+                        self.agentStatus = LumaBarL10n.agentDone(elapsed)
                     }
                     if purpose == .shellCommand {
                         let command = Self.extractShellCommand(from: self.agentResponse)
@@ -16158,13 +16271,13 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 await MainActor.run {
                     guard self.agentRequestToken == requestToken else { return }
                     self.isAgentStreaming = false
-                    self.agentStatus = "Canceled"
+                    self.agentStatus = LumaBarL10n.agentCanceled
                 }
             } catch {
                 await MainActor.run {
                     guard self.agentRequestToken == requestToken else { return }
                     self.isAgentStreaming = false
-                    self.agentStatus = "Error"
+                    self.agentStatus = LumaBarL10n.agentError
                     self.agentResponse = error.localizedDescription
                 }
             }
@@ -16353,14 +16466,14 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     private func planAndExecuteLocalTool(_ prompt: String) {
         guard let apiKey = AgentCredentialStore.currentAPIKey(), !apiKey.isEmpty else {
             completeAgentLocalResponse(
-                status: "API key needed",
+                status: LumaBarL10n.agentAPIKeyNeeded,
                 response: "需要 \(AgentModelProvider.current.displayName) API Key 才能规划本地动作。"
             )
             return
         }
         agentTask?.cancel()
         isAgentStreaming = true
-        agentStatus = "规划本地动作"
+        agentStatus = LumaBarL10n.agentPlanning
         agentResponse = "\(AgentModelProvider.current.displayName) 正在选择本地工具…"
         let modelName = agentModelName
         agentTask = Task { [weak self, prompt, apiKey, modelName] in
@@ -16395,7 +16508,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             } catch {
                 guard let self else { return }
                 self.isAgentStreaming = false
-                self.agentStatus = "规划失败"
+                self.agentStatus = LumaBarL10n.agentPlanningFailed
                 self.agentResponse = error.localizedDescription
             }
         }
@@ -16529,7 +16642,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
         agentTask?.cancel()
         isAgentStreaming = true
-        agentStatus = "Searching music"
+        agentStatus = LumaBarL10n.agentSearchingMusic
         agentResponse = "正在本地网易云曲库查找「\(cleanedQuery)」…"
 
         agentTask = Task { [weak self, cleanedQuery] in
@@ -16553,7 +16666,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             do {
                 guard let song = try await NetEaseAgentSearchClient.firstSong(matching: cleanedQuery) else {
                     self.isAgentStreaming = false
-                    self.agentStatus = "No music found"
+                    self.agentStatus = LumaBarL10n.agentNoMusic
                     self.agentResponse = "本地网易云和在线搜索都没有找到「\(cleanedQuery)」。可以换个歌名再试。"
                     return
                 }
@@ -16562,7 +16675,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 self.claimMusicSourceExclusivity(.netEase, reason: "agent-open-song")
                 NetEaseBridge.shared.openSong(id: song.id)
                 self.isAgentStreaming = false
-                self.agentStatus = "Music"
+                self.agentStatus = LumaBarL10n.modeMusic
                 self.agentResponse = "本地没有「\(cleanedQuery)」，已改为在网易云在线播放 \(song.title) · \(song.artist)。"
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
                     self?.refreshNetEaseNowPlaying(force: true)
@@ -16572,7 +16685,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 }
             } catch {
                 self.isAgentStreaming = false
-                self.agentStatus = "Music error"
+                self.agentStatus = LumaBarL10n.agentMusicError
                 self.agentResponse = "本地未找到，在线搜索也失败了：\(error.localizedDescription)"
             }
         }
@@ -17042,7 +17155,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         let location = Self.weatherLocation(from: prompt)
         agentTask?.cancel()
         isAgentStreaming = true
-        agentStatus = "Weather"
+        agentStatus = LumaBarL10n.agentWeather
         agentResponse = "Fetching weather for \(location)..."
 
         agentTask = Task { [weak self, location] in
@@ -17051,14 +17164,14 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 await MainActor.run {
                     guard let self else { return }
                     self.isAgentStreaming = false
-                    self.agentStatus = "Weather"
+                    self.agentStatus = LumaBarL10n.agentWeather
                     self.agentResponse = report
                 }
             } catch {
                 await MainActor.run {
                     guard let self else { return }
                     self.isAgentStreaming = false
-                    self.agentStatus = "Weather error"
+                    self.agentStatus = LumaBarL10n.agentWeatherError
                     self.agentResponse = error.localizedDescription
                 }
             }
@@ -17149,7 +17262,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         guard let command = pendingAgentShellCommand else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(command, forType: .string)
-        agentStatus = "Copied"
+        agentStatus = LumaBarL10n.agentCopied
     }
 
     private func prepareMessageAction(_ action: PendingMessageAction) {
@@ -17157,7 +17270,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         isAgentStreaming = false
         pendingMessageAction = action
         isMessageConfirmationPending = false
-        agentStatus = "确认发送"
+        agentStatus = LumaBarL10n.agentConfirmSend
         agentResponse = "准备通过“信息”发送给 \(action.recipient)：\n\(action.content)"
     }
 
@@ -17165,7 +17278,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         guard let action = pendingMessageAction else { return }
         guard isMessageConfirmationPending else {
             isMessageConfirmationPending = true
-            agentStatus = "再次点击确认发送"
+            agentStatus = LumaBarL10n.agentConfirmSendAgain
             messageConfirmationResetWorkItem?.cancel()
             let workItem = DispatchWorkItem { [weak self] in
                 self?.isMessageConfirmationPending = false
@@ -17179,18 +17292,18 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         isMessageConfirmationPending = false
         pendingMessageAction = nil
         isAgentStreaming = true
-        agentStatus = "正在发送"
+        agentStatus = LumaBarL10n.agentSending
         Task { [weak self, action] in
             do {
                 try await MessagesAgentBridge.send(action)
                 guard let self else { return }
                 self.isAgentStreaming = false
-                self.agentStatus = "已发送"
+                self.agentStatus = LumaBarL10n.agentSent
                 self.agentResponse = "已通过“信息”发送给 \(action.recipient)：\n\(action.content)"
             } catch {
                 guard let self else { return }
                 self.isAgentStreaming = false
-                self.agentStatus = "发送失败"
+                self.agentStatus = LumaBarL10n.agentSendFailed
                 self.agentResponse = error.localizedDescription
                 self.pendingMessageAction = action
             }
@@ -17201,7 +17314,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         messageConfirmationResetWorkItem?.cancel()
         isMessageConfirmationPending = false
         pendingMessageAction = nil
-        agentStatus = "已取消"
+        agentStatus = LumaBarL10n.agentCanceled
         agentResponse = "没有发送信息。"
     }
 
@@ -17210,7 +17323,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         isAgentStreaming = false
         pendingAgentShellCommand = command
         isAgentShellConfirmationPending = false
-        agentStatus = "Shell ready"
+        agentStatus = LumaBarL10n.agentShellReady
         agentResponse = "$ \(command)"
     }
 
@@ -17218,7 +17331,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         guard let command = pendingAgentShellCommand else { return }
         guard isAgentShellConfirmationPending else {
             isAgentShellConfirmationPending = true
-            agentStatus = "Confirm run"
+            agentStatus = LumaBarL10n.confirmRun
             shellConfirmationResetWorkItem?.cancel()
             let workItem = DispatchWorkItem { [weak self] in
                 self?.isAgentShellConfirmationPending = false
@@ -17238,7 +17351,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         isAgentShellConfirmationPending = false
         pendingAgentShellCommand = nil
         guard !Self.isBlockedShellCommand(command) else {
-            agentStatus = "Blocked"
+            agentStatus = LumaBarL10n.agentBlocked
             agentResponse = "This command is too destructive to run from Screen Bar."
             return
         }
@@ -17251,7 +17364,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         agentTask?.cancel()
         isAgentStreaming = true
         isAgentShellRunning = true
-        agentStatus = "Running"
+        agentStatus = LumaBarL10n.agentRunning
         agentResponse = "$ \(command)\n"
         agentTask = Task { [weak self, command] in
             let startedAt = Date()
@@ -17276,7 +17389,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 guard let self else { return }
                 self.isAgentStreaming = false
                 self.isAgentShellRunning = false
-                self.agentStatus = "Run failed"
+                self.agentStatus = LumaBarL10n.agentRunFailed
                 self.agentResponse = error.localizedDescription
             }
         }
@@ -17292,10 +17405,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             }
             AgentActivityMemoryStore.record(summary: "打开应用 \(result.displayName)")
             let verb = result.wasAlreadyRunning ? "Showing" : "Opening"
-            agentStatus = "Exit 0"
+            agentStatus = LumaBarL10n.agentExit(0)
             agentResponse = "$ \(command)\n\n\(verb) \(result.displayName)."
         } catch {
-            agentStatus = "Exit 1"
+            agentStatus = LumaBarL10n.agentExit(1)
             agentResponse = "$ \(command)\n\n\(error.localizedDescription)"
         }
     }
@@ -18630,14 +18743,14 @@ private enum LiquidGlassPaint {
     static func washOpacity(role: Role, isHovering: Bool, isSelected: Bool) -> Double {
         switch role {
         case .compact:
-            // Keep wash whisper-thin so wallpaper reads through Aura glass.
-            return isHovering ? 0.06 : 0.03
+            // Near-clear wash — wallpaper should dominate.
+            return isHovering ? 0.02 : 0.0
         case .panel, .overlay:
             return 0.0
         case .card:
-            return isSelected ? 0.06 : 0.02
+            return isSelected ? 0.04 : 0.015
         case .control:
-            return isSelected ? 0.12 : 0.06
+            return isSelected ? 0.06 : 0.03
         }
     }
 
@@ -18645,11 +18758,11 @@ private enum LiquidGlassPaint {
     static func rimWidth(emphasized: Bool, role: Role) -> CGFloat {
         switch role {
         case .panel, .overlay:
-            return 1.0
+            return 0.75
         case .card:
             return 0.5
         case .compact, .control:
-            return emphasized ? 1.0 : 0.5
+            return emphasized ? 0.75 : 0.5
         }
     }
 
@@ -18659,10 +18772,10 @@ private enum LiquidGlassPaint {
             // Large sheets need a cleaner, more even rim — less milky than the bar.
             return LinearGradient(
                 colors: [
-                    Color.white.opacity(0.72),
+                    Color.white.opacity(0.42),
+                    Color.white.opacity(0.14),
                     Color.white.opacity(0.28),
-                    Color.white.opacity(0.48),
-                    Color.white.opacity(0.22)
+                    Color.white.opacity(0.10)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -18670,10 +18783,10 @@ private enum LiquidGlassPaint {
         default:
             return LinearGradient(
                 colors: [
-                    Color.white.opacity(emphasized ? 0.78 : 0.58),
-                    Color.white.opacity(emphasized ? 0.42 : 0.28),
-                    Color.white.opacity(emphasized ? 0.55 : 0.36),
-                    Color.white.opacity(emphasized ? 0.32 : 0.20)
+                    Color.white.opacity(emphasized ? 0.48 : 0.32),
+                    Color.white.opacity(emphasized ? 0.22 : 0.14),
+                    Color.white.opacity(emphasized ? 0.30 : 0.18),
+                    Color.white.opacity(emphasized ? 0.16 : 0.10)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -18691,26 +18804,26 @@ private struct LiquidGlassInnerShadows<S: Shape>: View {
         Group {
             switch role {
             case .compact, .control:
-                // Compact bar recipe (kept exactly — user-approved).
+                // Soft edge only — avoid dense milk from heavy dual shadows.
                 ZStack {
                     shape
-                        .stroke(Color.white.opacity(0.10), lineWidth: 4)
-                        .blur(radius: 2)
+                        .stroke(Color.white.opacity(0.06), lineWidth: 2.5)
+                        .blur(radius: 1.2)
                     shape
-                        .stroke(Color.black.opacity(0.32), lineWidth: 5)
-                        .offset(y: 0.75)
-                        .blur(radius: 3.5)
+                        .stroke(Color.black.opacity(0.14), lineWidth: 3)
+                        .offset(y: 0.5)
+                        .blur(radius: 2.2)
                 }
             case .panel, .overlay:
                 // Edge catch only — no dark/gray fill into the sheet.
                 shape
-                    .stroke(Color.white.opacity(0.14), lineWidth: 2)
-                    .blur(radius: 1)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1.5)
+                    .blur(radius: 0.8)
             case .card:
                 // Content wells only need a soft inner catch — not full glass depth.
                 shape
-                    .stroke(Color.white.opacity(0.08), lineWidth: 2)
-                    .blur(radius: 1)
+                    .stroke(Color.white.opacity(0.05), lineWidth: 1.5)
+                    .blur(radius: 0.8)
             }
         }
         .clipShape(shape)
@@ -18718,8 +18831,73 @@ private struct LiquidGlassInnerShadows<S: Shape>: View {
     }
 }
 
-/// Shared Aura / Liquid Glass surface: behind-window system material
-/// + whisper wash + dual inner shadows + rim light.
+/// Aura frosted-glass plate. `auraOpacity` 0 ≈ clear tint, 1 = soft frost (still highly transparent).
+/// Never paints an opaque white slab (that washed out light Aura text).
+private struct AuraPlateFill: View {
+    var cornerRadius: CGFloat
+    @AppStorage(AuraOpacityPreference.defaultsKey) private var auraOpacity = AuraOpacityPreference.defaultValue
+
+    private var resolved: Double { AuraOpacityPreference.clamped(auraOpacity) }
+
+    /// Stick to thin materials only — `.popover` / menu fills are too milky for Aura.
+    private var material: NSVisualEffectView.Material {
+        resolved < 0.55 ? .underWindowBackground : .hudWindow
+    }
+
+    /// Floor stays very see-through; even 100% caps well below opaque.
+    private var glassOpacity: Double { 0.10 + resolved * 0.48 }
+
+    /// Barely-there pearl — just enough to read edges, never a wash.
+    private var frostWash: Double { resolved * 0.05 }
+
+    var body: some View {
+        ZStack {
+            AuraGlassBackdrop(cornerRadius: cornerRadius, material: material)
+                .opacity(glassOpacity)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(Color.white.opacity(frostWash))
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// Slider shown inside Theme → Aura submenu.
+struct AuraOpacitySliderView: View {
+    @AppStorage(AuraOpacityPreference.defaultsKey) private var auraOpacity = AuraOpacityPreference.defaultValue
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(LumaBarL10n.auraOpacity)
+                    .font(.system(size: 11, weight: .semibold))
+                Spacer(minLength: 8)
+                Text("\(Int((AuraOpacityPreference.clamped(auraOpacity) * 100).rounded()))%")
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Slider(
+                value: Binding(
+                    get: { AuraOpacityPreference.clamped(auraOpacity) },
+                    set: { newValue in
+                        let clamped = AuraOpacityPreference.clamped(newValue)
+                        auraOpacity = clamped
+                        NotificationCenter.default.post(
+                            name: AuraOpacityPreference.didChangeNotification,
+                            object: clamped
+                        )
+                    }
+                ),
+                in: AuraOpacityPreference.range
+            )
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(width: 232)
+    }
+}
+
+/// Aura card/control frosted surface — lighter than the main plate, same opacity slider.
 private struct LiquidGlassSurface<S: InsettableShape>: View {
     let shape: S
     var role: LiquidGlassPaint.Role = .panel
@@ -18727,134 +18905,24 @@ private struct LiquidGlassSurface<S: InsettableShape>: View {
     var isSelected: Bool = false
     var selectedAccent: Color? = nil
     var cornerRadius: CGFloat = 16
-    @Environment(\.islandTheme) private var theme
+    @AppStorage(AuraOpacityPreference.defaultsKey) private var auraOpacity = AuraOpacityPreference.defaultValue
 
-    private var emphasized: Bool { isHovering || isSelected }
-    private var resolvedCornerRadius: CGFloat {
-        switch role {
-        case .compact, .control:
-            return max(cornerRadius, NotchMetrics.compactHeight / 2)
-        case .panel, .overlay:
-            return theme.expandedCornerRadius
-        case .card:
-            return theme.cardCornerRadius
-        }
-    }
+    private var resolved: Double { AuraOpacityPreference.clamped(auraOpacity) }
+    private var roleScale: Double { role == .card || role == .control ? 0.78 : 1.0 }
 
     var body: some View {
-        Group {
-            switch role {
-            case .card:
-                cardBody
-            case .panel, .overlay:
-                panelBody
-            case .compact, .control:
-                compactBody
-            }
-        }
-    }
-
-    /// Compact bar / small controls — live HUD glass (forced active).
-    private var compactBody: some View {
-        ZStack {
-            // Clip via CALayer cornerRadius inside AuraGlassEffectView — SwiftUI
-            // `.clipShape` on NSVisualEffectView freezes blur into solid gray.
-            AuraGlassBackdrop(
-                cornerRadius: resolvedCornerRadius,
-                material: .hudWindow
-            )
-
-            ZStack {
-                shape.fill(
-                    Color.white.opacity(
-                        LiquidGlassPaint.washOpacity(
-                            role: role,
-                            isHovering: isHovering,
-                            isSelected: isSelected
-                        )
-                    )
-                )
-
-                if isSelected, let selectedAccent {
-                    shape.fill(selectedAccent.opacity(0.10))
-                }
-
-                LiquidGlassInnerShadows(shape: shape, role: role)
-
-                shape.fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(emphasized ? 0.10 : 0.05),
-                            Color.white.opacity(0.015),
-                            .clear
-                        ],
-                        startPoint: .top,
-                        endPoint: UnitPoint(x: 0.5, y: 0.45)
-                    )
-                )
-
-                shape.strokeBorder(
-                    LiquidGlassPaint.rimGradient(emphasized: emphasized, role: role),
-                    lineWidth: LiquidGlassPaint.rimWidth(emphasized: emphasized, role: role)
-                )
-            }
-            .clipShape(shape)
-            .allowsHitTesting(false)
-        }
-    }
-
-    /// Expanded island — thinnest clear glass; wallpaper stays readable.
-    private var panelBody: some View {
         ZStack {
             AuraGlassBackdrop(
-                cornerRadius: resolvedCornerRadius,
-                material: .hudWindow
+                cornerRadius: cornerRadius,
+                material: .underWindowBackground
             )
-
-            ZStack {
-                LiquidGlassInnerShadows(shape: shape, role: role)
-
-                shape.strokeBorder(
-                    LiquidGlassPaint.rimGradient(emphasized: true, role: role),
-                    lineWidth: 1.0
-                )
-
-                shape
-                    .inset(by: 1.25)
-                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
-            }
-            .clipShape(shape)
-            .allowsHitTesting(false)
-        }
-    }
-
-    /// Interior wells on glass — frosted chips only (no nested material).
-    private var cardBody: some View {
-        ZStack {
-            shape.fill(
-                Color.white.opacity(
-                    LiquidGlassPaint.washOpacity(
-                        role: .card,
-                        isHovering: false,
-                        isSelected: isSelected
-                    )
-                )
-            )
-
+            .opacity((0.08 + resolved * 0.40) * roleScale)
+            shape.fill(Color.white.opacity(resolved * 0.04 * roleScale))
             if isSelected, let selectedAccent {
-                shape.fill(selectedAccent.opacity(0.06))
+                shape.fill(selectedAccent.opacity(0.10))
             }
-
-            LiquidGlassInnerShadows(shape: shape, role: .card)
-
-            shape.strokeBorder(
-                isSelected
-                    ? (selectedAccent ?? Color.white).opacity(0.40)
-                    : Color.white.opacity(0.16),
-                lineWidth: 0.5
-            )
         }
-        .clipShape(shape)
+        .allowsHitTesting(false)
     }
 }
 
@@ -18960,7 +19028,7 @@ private struct CompactBarBackground: View {
                 .padding(.bottom, 3)
                 .clipShape(shape)
             case .aura:
-                LiquidGlassSurface(shape: shape, role: .compact, isHovering: isHovering)
+                AuraPlateFill(cornerRadius: NotchMetrics.compactHeight / 2)
             case .void:
                 VisualEffectBackground(
                     material: .hudWindow,
@@ -19091,7 +19159,7 @@ private struct ExpandedIslandBackground: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 6)
             case .aura:
-                LiquidGlassSurface(shape: shape, role: .panel)
+                AuraPlateFill(cornerRadius: theme.expandedCornerRadius)
             case .void:
                 VisualEffectBackground(
                     material: .hudWindow,
@@ -19195,11 +19263,12 @@ private struct ThemedCardBackground: View {
                     shape: shape,
                     role: .card,
                     isSelected: isSelected,
-                    selectedAccent: selectedAccent
+                    selectedAccent: selectedAccent,
+                    cornerRadius: radius
                 )
             }
         }
-        .clipShape(shape)
+        .modifier(CompactBarClipIfNeeded(theme: theme, shape: shape))
     }
 }
 
@@ -19618,10 +19687,10 @@ private struct PixelDesktopPetView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .padding(.trailing, 5)
         .padding(.bottom, 3)
-        .help("Click to talk, long-press for Voice Whisper, drag to move")
+        .help(LumaBarL10n.petHelp)
         .accessibilityLabel(model.theme.desktopPetName)
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: Text("Talk"), onTap)
+        .accessibilityAction(named: Text(LumaBarL10n.petTalk), onTap)
     }
 }
 
@@ -19852,31 +19921,31 @@ struct CompactLeftView: View {
         .animation(.easeInOut(duration: 0.16), value: model.activeMode)
         .animation(.easeInOut(duration: 0.16), value: model.displayedIsPlaying)
         .contextMenu {
-            Button("Rescan Music") {
+            Button(LumaBarL10n.actionRescan) {
                 model.scanLocalMusic()
             }
-            Button("Open NetEase Cloud Music") {
+            Button(LumaBarL10n.actionOpenNetEase) {
                 model.openNetEaseCloudMusic()
             }
-            Button("Open Apple Music") {
+            Button(LumaBarL10n.actionOpenAppleMusic) {
                 AppleMusicService.shared.openApplication(activates: true)
                 model.setMusicLibrarySource(.appleMusic)
             }
-            Button("Refresh NetEase Playlists") {
+            Button(LumaBarL10n.actionRefreshPlaylists) {
                 model.refreshNetEasePlaylists()
             }
             Divider()
-            Button("Switch to Music") {
+            Button(LumaBarL10n.actionSwitchMusic) {
                 model.showMusic()
             }
-            Button("Switch to System") {
+            Button(LumaBarL10n.actionSwitchSystem) {
                 model.showSystem()
             }
-            Button("Switch to Agent") {
+            Button(LumaBarL10n.actionSwitchAgent) {
                 model.showAgent()
             }
             Divider()
-            Button("Quit") {
+            Button(LumaBarL10n.actionQuit) {
                 AppController.quitFromUserAction()
             }
         }
@@ -19918,7 +19987,7 @@ struct CompactRightView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .help("Open token usage · \(model.agentTokenSummaryText) tokens")
+                .help(LumaBarL10n.tokenOpenHelp(model.agentTokenSummaryText))
                 .animation(.easeInOut(duration: 0.2), value: model.agentTokenProgress)
             } else if model.activeMode == .agent {
                 Button {
@@ -19932,7 +20001,7 @@ struct CompactRightView: View {
                     HStack(spacing: 5) {
                         Image(systemName: model.isAgentStreaming ? "bolt.fill" : "sparkles")
                             .font(.system(size: 9, weight: .bold))
-                        Text(model.isAgentStreaming ? "Live" : (model.agentHasAPIKey ? "Ask" : "Key"))
+                        Text(model.isAgentStreaming ? LumaBarL10n.agentLive : (model.agentHasAPIKey ? LumaBarL10n.agentAsk : LumaBarL10n.agentKeyBadge))
                             .font(theme.font(size: 9, weight: .semibold))
                             .lineLimit(1)
                     }
@@ -19945,7 +20014,7 @@ struct CompactRightView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .help(model.isExpanded ? "Close agent" : "Open agent")
+                .help(model.isExpanded ? LumaBarL10n.agentClose : LumaBarL10n.agentOpen)
             } else {
                 HStack(spacing: 5) {
                     Button {
@@ -19961,7 +20030,7 @@ struct CompactRightView: View {
                             )
                     }
                     .buttonStyle(.plain)
-                    .help(model.displayedIsPlaying ? "Pause" : "Play")
+                    .help(model.displayedIsPlaying ? LumaBarL10n.musicPause : LumaBarL10n.musicPlay)
 
                     Button {
                         if model.isExpanded {
@@ -19986,8 +20055,8 @@ struct CompactRightView: View {
                     .buttonStyle(.plain)
                     .help(
                         model.shouldShowExternalTokenInCompact
-                            ? "Open player · \(model.externalTokenBrandLabel) \(model.agentTokenPercentText)"
-                            : "Open player"
+                            ? LumaBarL10n.musicOpenPlayer(brand: model.externalTokenBrandLabel, percent: model.agentTokenPercentText)
+                            : LumaBarL10n.musicOpenPlayer
                     )
                     .animation(.easeInOut(duration: 0.2), value: model.agentTokenProgress)
                     .animation(.easeInOut(duration: 0.16), value: model.isMonitoringExternalTokenUsage)
@@ -20001,7 +20070,7 @@ struct CompactRightView: View {
                             .frame(width: 18, height: 22)
                     }
                     .buttonStyle(.plain)
-                    .help("Next")
+                    .help(LumaBarL10n.quickNext)
                 }
             }
         }
@@ -20012,31 +20081,31 @@ struct CompactRightView: View {
         .animation(.easeInOut(duration: 0.16), value: model.activeMode)
         .animation(.easeInOut(duration: 0.16), value: model.displayedIsPlaying)
         .contextMenu {
-            Button("Rescan Music") {
+            Button(LumaBarL10n.actionRescan) {
                 model.scanLocalMusic()
             }
-            Button("Open NetEase Cloud Music") {
+            Button(LumaBarL10n.actionOpenNetEase) {
                 model.openNetEaseCloudMusic()
             }
-            Button("Open Apple Music") {
+            Button(LumaBarL10n.actionOpenAppleMusic) {
                 AppleMusicService.shared.openApplication(activates: true)
                 model.setMusicLibrarySource(.appleMusic)
             }
-            Button("Refresh NetEase Playlists") {
+            Button(LumaBarL10n.actionRefreshPlaylists) {
                 model.refreshNetEasePlaylists()
             }
             Divider()
-            Button("Switch to Music") {
+            Button(LumaBarL10n.actionSwitchMusic) {
                 model.showMusic()
             }
-            Button("Switch to System") {
+            Button(LumaBarL10n.actionSwitchSystem) {
                 model.showSystem()
             }
-            Button("Switch to Agent") {
+            Button(LumaBarL10n.actionSwitchAgent) {
                 model.showAgent()
             }
             Divider()
-            Button("Quit") {
+            Button(LumaBarL10n.actionQuit) {
                 AppController.quitFromUserAction()
             }
         }
@@ -20160,7 +20229,7 @@ struct SystemDashboardView: View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
                 SystemMetricTile(
-                    title: "CPU",
+                    title: LumaBarL10n.sysCPU,
                     value: metrics.cpuText,
                     detail: metrics.cpuDetailText,
                     systemName: "cpu",
@@ -20168,7 +20237,7 @@ struct SystemDashboardView: View {
                     progress: metrics.cpuUsage
                 )
                 SystemMetricTile(
-                    title: "Memory",
+                    title: LumaBarL10n.sysMemory,
                     value: metrics.memoryText,
                     detail: "\(metrics.memoryDetailText) • Free \(metrics.memoryFreeText)",
                     systemName: "memorychip",
@@ -20179,7 +20248,7 @@ struct SystemDashboardView: View {
 
             HStack(spacing: 10) {
                 SystemMetricTile(
-                    title: "Disk",
+                    title: LumaBarL10n.sysDisk,
                     value: metrics.diskText,
                     detail: "Used \(metrics.diskUsedText) • \(metrics.diskDetailText)",
                     systemName: "internaldrive",
@@ -20187,7 +20256,7 @@ struct SystemDashboardView: View {
                     progress: metrics.diskUsage
                 )
                 SystemMetricTile(
-                    title: "Battery",
+                    title: LumaBarL10n.sysBattery,
                     value: metrics.batteryText,
                     detail: "\(metrics.powerSourceName) • \(metrics.isCharging ? "Charging" : "Discharging")",
                     systemName: metrics.isCharging ? "bolt.fill" : "battery.75",
@@ -20205,7 +20274,7 @@ struct SystemDashboardView: View {
                                     Label(metrics.networkDownText, systemImage: "arrow.down")
                                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                                         .foregroundStyle(theme.foreground(opacity: 0.9))
-                                    Text("Total \(metrics.networkDownTotalText)")
+                                    Text(LumaBarL10n.sysTotal(metrics.networkDownTotalText))
                                         .font(theme.font(size: 9, weight: .medium))
                                         .foregroundStyle(theme.mutedForeground(opacity: 0.9))
                                 }
@@ -20214,7 +20283,7 @@ struct SystemDashboardView: View {
                                     Label(metrics.networkUpText, systemImage: "arrow.up")
                                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                                         .foregroundStyle(theme.foreground(opacity: 0.9))
-                                    Text("Total \(metrics.networkUpTotalText)")
+                                    Text(LumaBarL10n.sysTotal(metrics.networkUpTotalText))
                                         .font(theme.font(size: 9, weight: .medium))
                                         .foregroundStyle(theme.mutedForeground(opacity: 0.9))
                                 }
@@ -20225,7 +20294,7 @@ struct SystemDashboardView: View {
                                     Text(metrics.uptimeText)
                                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                                         .foregroundStyle(theme.foreground(opacity: 0.92))
-                                    Text("Uptime")
+                                    Text(LumaBarL10n.sysUptime)
                                         .font(theme.font(size: 9, weight: .medium))
                                         .foregroundStyle(theme.mutedForeground(opacity: 0.9))
                                 }
@@ -20425,7 +20494,7 @@ struct NetEasePlaylistShelf: View {
     var body: some View {
         if !model.netEasePlaylists.isEmpty {
             HStack(spacing: 4) {
-                playlistStepButton(systemName: "chevron.left", help: "Previous playlist") {
+                playlistStepButton(systemName: "chevron.left", help: LumaBarL10n.musicPrevPlaylist) {
                     model.browseAdjacentNetEasePlaylist(offset: -1)
                 }
 
@@ -20449,7 +20518,7 @@ struct NetEasePlaylistShelf: View {
                 .scrollPosition(id: $scrollPositionID, anchor: .leading)
                 .clipped()
 
-                playlistStepButton(systemName: "chevron.right", help: "Next playlist") {
+                playlistStepButton(systemName: "chevron.right", help: LumaBarL10n.musicNextPlaylist) {
                     model.browseAdjacentNetEasePlaylist(offset: 1)
                 }
             }
@@ -21532,7 +21601,7 @@ private struct TokenUsageGauge: View {
             case .aura:
                 let lineWidth = max(3.5, side * 0.1)
                 ZStack {
-                    LiquidGlassSurface(shape: Circle(), role: .control)
+                    LiquidGlassSurface(shape: Circle(), role: .control, cornerRadius: side / 2)
                     Circle()
                         .trim(from: 0, to: clampedProgress)
                         .stroke(
@@ -21721,7 +21790,11 @@ private struct TokenProgressTrack: View {
                 GeometryReader { proxy in
                     let track = Capsule(style: .continuous)
                     ZStack(alignment: .leading) {
-                        LiquidGlassSurface(shape: track, role: .control)
+                        LiquidGlassSurface(
+                            shape: track,
+                            role: .control,
+                            cornerRadius: proxy.size.height / 2
+                        )
                         track
                             .fill(
                                 LinearGradient(
@@ -21848,10 +21921,10 @@ private struct TokenUsageCardBackground: View {
                     .padding(.top, 6)
 
             case .aura:
-                LiquidGlassSurface(shape: shape, role: .overlay)
+                AuraPlateFill(cornerRadius: radius)
             }
         }
-        .clipShape(shape)
+        .modifier(CompactBarClipIfNeeded(theme: theme, shape: shape))
     }
 }
 
@@ -21962,10 +22035,10 @@ private struct CodexTokenOverlayBackground: View {
                     .padding(.top, 6)
 
             case .aura:
-                LiquidGlassSurface(shape: shape, role: .overlay)
+                AuraPlateFill(cornerRadius: theme.tokenOverlayCornerRadius)
             }
         }
-        .clipShape(shape)
+        .modifier(CompactBarClipIfNeeded(theme: theme, shape: shape))
     }
 }
 
@@ -22102,11 +22175,11 @@ private struct CodexTokenOverlayView: View {
                                         : Color.white.opacity(0.4))
                             )
                         Spacer(minLength: 4)
-                        Text("剩余 \(weekly.remainingPercentText)")
+                        Text(LumaBarL10n.remainingPercent(weekly.remainingPercentText))
                             .font(theme.font(size: 10, weight: .bold))
                             .foregroundStyle(model.codexWeeklyQuotaAccentColor)
                             .monospacedDigit()
-                        Text("已用 \(weekly.usedPercentText)")
+                        Text(LumaBarL10n.usedPercent(weekly.usedPercentText))
                             .font(theme.font(size: 10, weight: .semibold))
                             .foregroundStyle(theme.foreground(opacity: 0.88))
                             .monospacedDigit()
@@ -22226,13 +22299,13 @@ private struct TaskCompletionOverlayView: View {
             .frame(width: 50, height: 50)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("\((model.taskCompletionNotice?.source.uppercaseBrandName ?? "AI")) TASK COMPLETE")
+                Text("\((model.taskCompletionNotice?.source.uppercaseBrandName ?? "AI")) \(LumaBarL10n.taskComplete.uppercased(with: LumaBarL10n.resolvedLocale))")
                     .font(theme.font(size: 8.5, weight: .semibold))
                     .foregroundStyle(theme.primaryAccent.opacity(theme.isLight ? 0.9 : 0.72))
-                Text("任务已完成")
+                Text(LumaBarL10n.taskComplete)
                     .font(theme.font(size: 18, weight: .bold))
                     .foregroundStyle(theme.foreground(opacity: 0.96))
-                Text(model.taskCompletionNotice?.title ?? "可以回来查看结果")
+                Text(model.taskCompletionNotice?.title ?? LumaBarL10n.taskCompleteFallbackDetail)
                     .font(theme.font(size: 10.5, weight: .medium))
                     .foregroundStyle(theme.mutedForeground(opacity: 0.9))
                     .lineLimit(1)
@@ -22251,7 +22324,7 @@ private struct TaskCompletionOverlayView: View {
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
-            .help("关闭提醒")
+            .help(LumaBarL10n.dismissNotice)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
@@ -22271,7 +22344,7 @@ private struct TaskCompletionOverlayView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(model.taskCompletionNotice?.source.shortBrandName ?? "AI") 任务已完成"
+            LumaBarL10n.taskCompleteA11y(brand: model.taskCompletionNotice?.source.shortBrandName ?? "AI")
         )
     }
 }
@@ -22292,14 +22365,14 @@ private struct FullScreenTaskCompletionToastView: View {
             .frame(width: 40, height: 40)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("\(notice.source.uppercaseBrandName) · 后台任务已完成")
+                Text(LumaBarL10n.backgroundTaskComplete(brand: notice.source.uppercaseBrandName))
                     .font(theme.font(size: 9, weight: .semibold))
                     .foregroundStyle(theme.primaryAccent)
                 Text(notice.title)
                     .font(theme.font(size: 14, weight: .bold))
                     .foregroundStyle(theme.foreground(opacity: 0.95))
                     .lineLimit(1)
-                Text("返回后可查看完整结果")
+                Text(LumaBarL10n.returnForFullResult)
                     .font(theme.font(size: 10, weight: .medium))
                     .foregroundStyle(theme.mutedForeground(opacity: 0.84))
             }
@@ -22327,7 +22400,7 @@ private struct FullScreenTaskCompletionToastView: View {
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(notice.source.shortBrandName) 后台任务已完成，\(notice.title)"
+            LumaBarL10n.backgroundTaskCompleteA11y(brand: notice.source.shortBrandName, title: notice.title)
         )
     }
 }
@@ -22344,15 +22417,15 @@ struct TokenDashboardView: View {
 
             HStack(spacing: 0) {
                 tokenMetric(
-                    title: "Input",
+                    title: LumaBarL10n.tokenInput,
                     value: model.agentInputTokenText,
                     tint: theme.isPixelStyled ? theme.pixelBorder : Color.islandCyan
                 )
                 divider
-                tokenMetric(title: "Output", value: model.agentOutputTokenText, tint: theme.activityAccent)
+                tokenMetric(title: LumaBarL10n.tokenOutput, value: model.agentOutputTokenText, tint: theme.activityAccent)
 	                divider
 	                tokenMetric(
-	                    title: "Remaining",
+	                    title: LumaBarL10n.tokenRemaining,
 	                    value: model.agentRemainingTokenText,
 	                    tint: model.agentTokenAccentColor
 	                )
@@ -22476,7 +22549,7 @@ struct AgentDashboardView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(theme.foreground(opacity: 0.76))
                 .background { controlSurface(fill: theme.controlFill) }
-                .help("Paste API key")
+                .help(LumaBarL10n.agentPasteKey)
 
                 Button {
                     model.saveAgentAPIKey()
@@ -22515,7 +22588,7 @@ struct AgentDashboardView: View {
                                 : (theme.isLight ? Color.red.opacity(0.1) : Color.white.opacity(0.08))
                         )
                     }
-                    .help("Clear API key")
+                    .help(LumaBarL10n.agentClearKey)
                 }
             }
             .padding(.horizontal, 9)
@@ -22538,7 +22611,7 @@ struct AgentDashboardView: View {
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(theme.activityAccent)
                         .frame(width: 22, height: 22)
-                    Text("\(AgentModelProvider.current.displayName) · 已内置")
+                    Text("\(AgentModelProvider.current.displayName) · \(LumaBarL10n.builtinKey)")
                         .font(theme.font(size: 11, weight: .semibold))
                         .foregroundStyle(theme.foreground(opacity: 0.78))
                     Spacer(minLength: 0)
@@ -22564,7 +22637,7 @@ struct AgentDashboardView: View {
 
             HStack(spacing: 6) {
                 if theme.isForge {
-                    Text("CTX")
+                    Text(LumaBarL10n.agentCTX)
                         .font(.system(size: 8, weight: .black, design: .monospaced))
                         .tracking(0.5)
                         .foregroundStyle(theme.accentForeground)
@@ -22626,7 +22699,7 @@ struct AgentDashboardView: View {
             if !model.agentQuickActions.isEmpty {
                 HStack(spacing: 7) {
                     if theme.isForge {
-                        Text("TOOLS")
+                        Text(LumaBarL10n.agentTools)
                             .font(.system(size: 8, weight: .black, design: .monospaced))
                             .tracking(0.5)
                             .foregroundStyle(theme.accentForeground)
@@ -22682,7 +22755,7 @@ struct AgentDashboardView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(theme.foreground(opacity: 0.68))
-                    .help("取消发送")
+                    .help(LumaBarL10n.cancelSend)
 
                     Button {
                         model.requestOrSendPendingMessage()
@@ -22734,7 +22807,7 @@ struct AgentDashboardView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(theme.foreground(opacity: 0.72))
-                    .help("Copy command")
+                    .help(LumaBarL10n.agentCopyCommand)
 
                     Button {
                         model.requestOrExecutePendingAgentShellCommand()
@@ -22752,7 +22825,7 @@ struct AgentDashboardView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(model.isAgentShellConfirmationPending ? Color.white : theme.foreground(opacity: 0.76))
-                    .help(model.isAgentShellConfirmationPending ? "Confirm run" : "Run command")
+                    .help(model.isAgentShellConfirmationPending ? LumaBarL10n.confirmRun : LumaBarL10n.runCommand)
                 }
                 .padding(.horizontal, 9)
                 .frame(height: 28)
@@ -22783,8 +22856,8 @@ struct AgentDashboardView: View {
                 .disabled(model.isVoiceWhisperFinalizing)
                 .help(
                     model.isVoiceWhisperFinalizing
-                        ? "Finishing transcription"
-                        : (model.isVoiceWhisperRecording ? "Finish Voice Whisper" : "Start Voice Whisper")
+                        ? LumaBarL10n.voiceFinishing
+                        : (model.isVoiceWhisperRecording ? LumaBarL10n.voiceFinishWhisper : LumaBarL10n.voiceStartWhisper)
                 )
 
                 AgentMessageTextField(
@@ -22815,7 +22888,7 @@ struct AgentDashboardView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(model.agentInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .help("Send")
+                .help(LumaBarL10n.send)
             }
         }
         .onAppear {
@@ -22936,13 +23009,13 @@ struct MusicExpandedView: View {
                 Spacer(minLength: 6)
 
                 HStack(spacing: NotchMetrics.expandedModePillSpacing) {
-                    modePill(title: "Music", icon: "music.note", active: model.activeMode == .music) {
+                    modePill(title: LumaBarL10n.modeMusic, icon: "music.note", active: model.activeMode == .music) {
                         model.showMusic()
                     }
-                    modePill(title: "System", icon: "cpu", active: model.activeMode == .system) {
+                    modePill(title: LumaBarL10n.modeSystem, icon: "cpu", active: model.activeMode == .system) {
                         model.showSystem()
                     }
-                    modePill(title: "Agent", icon: "sparkles", active: model.activeMode == .agent) {
+                    modePill(title: LumaBarL10n.modeAgent, icon: "sparkles", active: model.activeMode == .agent) {
                         model.showAgent()
                     }
                 }
@@ -22963,7 +23036,7 @@ struct MusicExpandedView: View {
                         )
                 }
                 .buttonStyle(.plain)
-                .help("Collapse")
+                .help(LumaBarL10n.collapse)
             }
             .frame(height: NotchMetrics.expandedHeaderRowHeight)
 
@@ -22990,12 +23063,12 @@ struct MusicExpandedView: View {
                         Image(systemName: "music.note.list")
                             .font(.system(size: 11, weight: .bold))
                         Text(model.appleMusicNowPlaying == nil
-                             ? "打开 Music.app 开始播放"
+                             ? LumaBarL10n.openMusicHint
                              : "Apple Music · \(model.displayedTitle)")
                             .font(theme.font(size: 11, weight: .semibold))
                             .lineLimit(1)
                         Spacer(minLength: 0)
-                        Button("打开 Music") {
+                        Button(LumaBarL10n.openMusic) {
                             AppleMusicService.shared.openApplication(activates: true)
                         }
                         .buttonStyle(.plain)
@@ -23023,7 +23096,7 @@ struct MusicExpandedView: View {
                         }
                     )
                     .frame(height: 16)
-                    .help(model.displayedDuration > 0 ? "Seek" : "No timeline available")
+                    .help(model.displayedDuration > 0 ? LumaBarL10n.musicSeek : LumaBarL10n.musicNoTimeline)
 
                     HStack {
                         Text(timeString(previewPosition))
@@ -23130,31 +23203,31 @@ struct MusicExpandedView: View {
         .animation(.spring(response: 0.24, dampingFraction: 0.9), value: model.activeMode)
         .animation(.easeInOut(duration: 0.16), value: model.displayedIsPlaying)
         .contextMenu {
-            Button("Rescan Music") {
+            Button(LumaBarL10n.actionRescan) {
                 model.scanLocalMusic()
             }
-            Button("Open NetEase Cloud Music") {
+            Button(LumaBarL10n.actionOpenNetEase) {
                 model.openNetEaseCloudMusic()
             }
-            Button("Open Apple Music") {
+            Button(LumaBarL10n.actionOpenAppleMusic) {
                 AppleMusicService.shared.openApplication(activates: true)
                 model.setMusicLibrarySource(.appleMusic)
             }
-            Button("Refresh NetEase Playlists") {
+            Button(LumaBarL10n.actionRefreshPlaylists) {
                 model.refreshNetEasePlaylists()
             }
             Divider()
-            Button("Switch to Music") {
+            Button(LumaBarL10n.actionSwitchMusic) {
                 model.showMusic()
             }
-            Button("Switch to System") {
+            Button(LumaBarL10n.actionSwitchSystem) {
                 model.showSystem()
             }
-            Button("Switch to Agent") {
+            Button(LumaBarL10n.actionSwitchAgent) {
                 model.showAgent()
             }
             Divider()
-            Button("Quit") {
+            Button(LumaBarL10n.actionQuit) {
                 AppController.quitFromUserAction()
             }
         }
@@ -23326,24 +23399,24 @@ struct LyricsPane: View {
     @State private var loadingTimedOut = false
 
     private var lyricsText: String {
-        guard let track else { return "No track selected" }
+        guard let track else { return LumaBarL10n.lyricsNoTrack }
         let trimmed = track.lyrics.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }
         switch track.playbackSource {
         case .netEaseSong:
             // Once we have artwork/metadata, or loading timed out, stop infinite spinner copy.
             if track.artworkData != nil || loadingTimedOut {
-                return "暂无歌词"
+                return LumaBarL10n.lyricsNone
             }
-            return "正在加载歌词…"
+            return LumaBarL10n.lyricsLoading
         case .appleMusic:
             // Artwork may arrive before lyrics — don't treat artwork as "lyrics finished".
             if loadingTimedOut {
-                return "暂无歌词"
+                return LumaBarL10n.lyricsNone
             }
-            return "正在加载歌词…"
+            return LumaBarL10n.lyricsLoading
         case .netEase, .direct:
-            return "No embedded lyrics"
+            return LumaBarL10n.lyricsNoEmbedded
         }
     }
 
@@ -23374,7 +23447,7 @@ struct LyricsPane: View {
             HStack(spacing: 6) {
                 Image(systemName: "text.quote")
                     .font(.system(size: 10, weight: .bold))
-                Text("Lyrics")
+                Text(LumaBarL10n.lyrics)
                     .font(theme.font(size: 10, weight: .bold))
                 Spacer(minLength: 0)
             }
