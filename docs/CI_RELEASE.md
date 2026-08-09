@@ -27,12 +27,15 @@
 | `BUILD_CERTIFICATE_BASE64` | Developer ID Application 的 `.p12`（Base64） | `base64 -i Certificates.p12 \| pbcopy` |
 | `P12_PASSWORD` | 导出该 p12 时设的密码 | — |
 | `KEYCHAIN_PASSWORD` | CI 临时 keychain 密码（任意长随机串） | `openssl rand -base64 24` |
-| `APPLE_API_KEY_ID` | App Store Connect API Key ID | Users and Access → Keys |
-| `APPLE_API_ISSUER` | Issuer ID（UUID） | 同上页顶部 |
-| `APPLE_API_KEY_BASE64` | `AuthKey_XXX.p8` 文件 Base64 | `base64 -i AuthKey_XXX.p8 \| pbcopy` |
+| `APPLE_ID` | Apple ID 邮箱 | 开发者账号登录邮箱 |
+| `APPLE_APP_SPECIFIC_PASSWORD` | App 专用密码 | [appleid.apple.com](https://appleid.apple.com) → 登录与安全 → App 专用密码 |
+| `APPLE_TEAM_ID` | 10 位 Team ID | 如 `2DZ36MCTK5`（证书括号内） |
+| `APPLE_API_KEY_ID` | （备选）ASC API Key ID | Users and Access → Integrations → Keys |
+| `APPLE_API_ISSUER` | （备选）Issuer UUID | 同上页顶部 |
+| `APPLE_API_KEY_BASE64` | （备选）`AuthKey_XXX.p8` Base64 | `base64 -i AuthKey_XXX.p8 \| pbcopy` |
 | `LUMA_BAR_DEEPSEEK_API_KEY` | （可选）构建时注入 Agent Key | 不设则不注入 |
 
-> 推荐用 **App Store Connect API Key** 做公证，比 Apple ID + app-specific password 更稳。
+> 三套 Apple ID secrets 齐备时优先用它公证；否则回退 API Key。若 API Key 在 ASC 页面正确仍 401，改用 Apple ID 路径。
 
 ---
 
@@ -81,9 +84,14 @@ git push origin v0.4.0
 
 ```bash
 export LUMA_BAR_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
-export APPLE_API_KEY_PATH="$HOME/AuthKey_XXX.p8"
-export APPLE_API_KEY_ID="XXXXXXXXXX"
-export APPLE_API_ISSUER="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+# Prefer Apple ID auth:
+export APPLE_ID="you@example.com"
+export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+export APPLE_TEAM_ID="2DZ36MCTK5"
+# Or API key auth:
+# export APPLE_API_KEY_PATH="$HOME/AuthKey_XXX.p8"
+# export APPLE_API_KEY_ID="XXXXXXXXXX"
+# export APPLE_API_ISSUER="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 export LUMA_BAR_MAKE_DMG=1
 ./scripts/ci_release.sh
 ```
@@ -95,6 +103,7 @@ export LUMA_BAR_MAKE_DMG=1
 | 现象 | 处理 |
 |------|------|
 | `no identity found` | p12 不是 **Developer ID Application**，或 `KEYCHAIN_PASSWORD` / partition-list 失败 |
-| `notarytool` 401 | API Key 权限、Issuer、Key ID、p8 内容不对 |
+| `notarytool` 401（API Key） | ASC 页面正确仍可能 401；改用 `APPLE_ID` + App 专用密码 + `APPLE_TEAM_ID` |
+| `notarytool` 401（Apple ID） | 必须用 **App 专用密码**，不是 Apple ID 登录密码；Team ID 要与证书一致 |
 | Gatekeeper 仍拦 | 确认 staple 成功；用户下载的是 **stapled 后的 zip/dmg** |
 | SPM 资源缺失 | `build_app.sh` 已拷 `LumaBar_LumaBar.bundle`；看 CI 日志是否有 `Bundled localization` |

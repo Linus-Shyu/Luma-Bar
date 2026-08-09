@@ -3,9 +3,10 @@
 #
 # Required env (CI):
 #   LUMA_BAR_CODESIGN_IDENTITY   e.g. "Developer ID Application: Name (TEAMID)"
-#   APPLE_API_KEY_PATH           path to AuthKey_XXX.p8
-#   APPLE_API_KEY_ID
-#   APPLE_API_ISSUER             UUID issuer
+#
+# Notary auth — either Apple ID *or* App Store Connect API key:
+#   APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID
+#   APPLE_API_KEY_PATH + APPLE_API_KEY_ID + APPLE_API_ISSUER
 #
 # Optional:
 #   LUMA_BAR_BUILD_UNIVERSAL=1
@@ -19,6 +20,25 @@ cd "$ROOT"
 
 die() { echo "error: $*" >&2; exit 1; }
 need() { [[ -n "${!1:-}" ]] || die "missing env $1"; }
+
+# Prefer Apple ID auth when present (works around ASC API key 401s).
+notary_auth_args() {
+  if [[ -n "${APPLE_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
+    echo "==> notarytool auth: Apple ID ($APPLE_ID, team=$APPLE_TEAM_ID)" >&2
+    printf '%s\n' --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID"
+    return 0
+  fi
+  if [[ -n "${APPLE_API_KEY_PATH:-}" && -n "${APPLE_API_KEY_ID:-}" && -n "${APPLE_API_ISSUER:-}" ]]; then
+    [[ -f "$APPLE_API_KEY_PATH" ]] || die "API key file not found: $APPLE_API_KEY_PATH"
+    if ! head -n 1 "$APPLE_API_KEY_PATH" | grep -q "BEGIN PRIVATE KEY"; then
+      die "APPLE_API_KEY_BASE64 does not decode to a .p8 private key (missing BEGIN PRIVATE KEY header)"
+    fi
+    echo "==> notarytool auth: API key (key-id=$APPLE_API_KEY_ID)" >&2
+    printf '%s\n' --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER"
+    return 0
+  fi
+  die "set Apple ID auth (APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID) or API key auth (APPLE_API_KEY_PATH, APPLE_API_KEY_ID, APPLE_API_ISSUER)"
+}
 
 APP_NAME="luma bar.app"
 OUT_DIR="${LUMA_BAR_RELEASE_DIR:-$ROOT/dist}"
@@ -71,26 +91,21 @@ echo "==> Zip for notarization (Apple requires zip/dmg/pkg, not raw .app)"
 if [[ "${LUMA_BAR_SKIP_NOTARIZE:-0}" == "1" ]]; then
   echo "==> Skipping notarization (LUMA_BAR_SKIP_NOTARIZE=1)"
 else
-  need APPLE_API_KEY_PATH
-  need APPLE_API_KEY_ID
-  need APPLE_API_ISSUER
-  [[ -f "$APPLE_API_KEY_PATH" ]] || die "API key file not found: $APPLE_API_KEY_PATH"
+  # Capture auth flags into an array (handles spaces in values safely).
+  AUTH_ARGS=()
+  while IFS= read -r line; do
+    AUTH_ARGS+=("$line")
+  done < <(notary_auth_args)
 
-  if ! head -n 1 "$APPLE_API_KEY_PATH" | grep -q "BEGIN PRIVATE KEY"; then
-    die "APPLE_API_KEY_BASE64 does not decode to a .p8 private key (missing BEGIN PRIVATE KEY header)"
-  fi
-
-  echo "==> Submit to notarytool (key-id=$APPLE_API_KEY_ID)"
-  if ! xcrun notarytool submit "$OUT_DIR/$ZIP_NAME" \
-    --key "$APPLE_API_KEY_PATH" \
-    --key-id "$APPLE_API_KEY_ID" \
-    --issuer "$APPLE_API_ISSUER" \
-    --wait
-  then
-    echo "error: notarytool failed (often HTTP 401 = bad Key ID / Issuer / .p8 Base64)." >&2
-    echo "Re-check GitHub secrets APPLE_API_KEY_ID, APPLE_API_ISSUER, APPLE_API_KEY_BASE64." >&2
-    echo "Decode check: echo \"\$APPLE_API_KEY_BASE64\" | base64 -d | head -1" >&2
-    echo "Expected first line: -----BEGIN PRIVATE KEY-----" >&2
+  echo "==> Submit to notarytool"
+  if ! xcrun notarytool submit "$OUT_DIR/$ZIP_NAME" "${AUTH_ARGS[@]}" --wait; then
+    echo "error: notarytool failed." >&2
+    if [[ -n "${APPLE_ID:-}" ]]; then
+      echo "Apple ID auth 401 → check APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD (appleid.apple.com), APPLE_TEAM_ID." >&2
+    else
+      echo "API key 401 → Key ID / Issuer / .p8 rejected by Apple (even when ASC UI looks correct)." >&2
+      echo "Fallback: set APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID secrets." >&2
+    fi
     exit 1
   fi
 
@@ -109,11 +124,7 @@ else
       -srcfolder "$STAGE" \
       -ov -format UDZO \
       "$OUT_DIR/$DMG_NAME"
-    xcrun notarytool submit "$OUT_DIR/$DMG_NAME" \
-      --key "$APPLE_API_KEY_PATH" \
-      --key-id "$APPLE_API_KEY_ID" \
-      --issuer "$APPLE_API_ISSUER" \
-      --wait
+    xcrun notarytool submit "$OUT_DIR/$DMG_NAME" "${AUTH_ARGS[@]}" --wait
     xcrun stapler staple "$OUT_DIR/$DMG_NAME"
     xcrun stapler validate "$OUT_DIR/$DMG_NAME"
   fi
