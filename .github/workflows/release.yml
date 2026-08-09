@@ -134,9 +134,17 @@ jobs:
           : "${APPLE_API_KEY_BASE64:?missing secret APPLE_API_KEY_BASE64}"
           : "${APPLE_API_KEY_ID:?missing secret APPLE_API_KEY_ID}"
           KEY_PATH="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
-          echo -n "$APPLE_API_KEY_BASE64" | base64 --decode > "$KEY_PATH"
+          # Accept both raw base64 and base64-with-newlines from `base64` / `pbcopy`.
+          echo -n "$APPLE_API_KEY_BASE64" | tr -d '\n\r ' | base64 --decode > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
+          if ! head -n 1 "$KEY_PATH" | grep -q "BEGIN PRIVATE KEY"; then
+            echo "error: APPLE_API_KEY_BASE64 did not decode to a .p8 key" >&2
+            echo "first bytes:" >&2
+            head -c 40 "$KEY_PATH" | xxd >&2 || true
+            exit 1
+          fi
           echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+          echo "Decoded API key OK ($(wc -c < "$KEY_PATH" | tr -d ' ') bytes)"
 
       - name: Build, sign, notarize, staple
         env:

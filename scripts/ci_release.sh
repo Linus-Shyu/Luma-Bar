@@ -57,7 +57,11 @@ ENTITLEMENTS="$ROOT/Support/LumaBar.entitlements"
 
 echo "==> Verify signature"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$STAGE/$APP_NAME"
-/usr/bin/spctl --assess --type execute -vv "$STAGE/$APP_NAME" 2>&1 || true
+if command -v spctl >/dev/null 2>&1; then
+  spctl --assess --type execute -vv "$STAGE/$APP_NAME" 2>&1 || true
+else
+  echo "note: spctl not available on this runner; skipping Gatekeeper assess"
+fi
 
 cp -R "$STAGE/$APP_NAME" "$SIGNED_APP"
 
@@ -72,12 +76,23 @@ else
   need APPLE_API_ISSUER
   [[ -f "$APPLE_API_KEY_PATH" ]] || die "API key file not found: $APPLE_API_KEY_PATH"
 
-  echo "==> Submit to notarytool"
-  xcrun notarytool submit "$OUT_DIR/$ZIP_NAME" \
+  if ! head -n 1 "$APPLE_API_KEY_PATH" | grep -q "BEGIN PRIVATE KEY"; then
+    die "APPLE_API_KEY_BASE64 does not decode to a .p8 private key (missing BEGIN PRIVATE KEY header)"
+  fi
+
+  echo "==> Submit to notarytool (key-id=$APPLE_API_KEY_ID)"
+  if ! xcrun notarytool submit "$OUT_DIR/$ZIP_NAME" \
     --key "$APPLE_API_KEY_PATH" \
     --key-id "$APPLE_API_KEY_ID" \
     --issuer "$APPLE_API_ISSUER" \
     --wait
+  then
+    echo "error: notarytool failed (often HTTP 401 = bad Key ID / Issuer / .p8 Base64)." >&2
+    echo "Re-check GitHub secrets APPLE_API_KEY_ID, APPLE_API_ISSUER, APPLE_API_KEY_BASE64." >&2
+    echo "Decode check: echo \"\$APPLE_API_KEY_BASE64\" | base64 -d | head -1" >&2
+    echo "Expected first line: -----BEGIN PRIVATE KEY-----" >&2
+    exit 1
+  fi
 
   echo "==> Staple ticket onto .app"
   xcrun stapler staple "$SIGNED_APP"
