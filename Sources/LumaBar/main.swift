@@ -14383,6 +14383,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
         syncMusicLibrarySourceToActivePlayback(force: false)
 
+        // Box the main-thread-only continuation so GCD @Sendable closures don't warn.
+        struct MainPlayContinuation: @unchecked Sendable {
+            let body: () -> Void
+        }
+        let continuation = playAction.map { MainPlayContinuation(body: $0) }
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             // Hard exclusive: rivals must be paused before any play command.
             ExclusiveAudioFocus.silenceRivals(
@@ -14392,8 +14398,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
             DispatchQueue.main.async {
                 guard let self, self.exclusivePlayGeneration == generation else { return }
-                if let playAction {
-                    playAction()
+                if let continuation {
+                    continuation.body()
                     return
                 }
                 switch target {

@@ -646,7 +646,7 @@ final class AppleMusicService: MusicServiceProtocol {
 
             if let scriptData, let valid = Self.validImageData(scriptData) {
                 print("[AppleMusic] Artwork loaded from AppleScript (\(valid.count) bytes)")
-                await self?.applyArtworkData(valid, token: token, title: title, artist: artist, source: "AppleScript")
+                self?.applyArtworkData(valid, token: token, title: title, artist: artist, source: "AppleScript")
                 return
             }
             if scriptData != nil {
@@ -658,7 +658,7 @@ final class AppleMusicService: MusicServiceProtocol {
             if let remote = await Self.fetchArtworkViaiTunesSearch(title: title, artist: artist),
                let valid = Self.validImageData(remote)
             {
-                await self?.applyArtworkData(valid, token: token, title: title, artist: artist, source: "iTunes")
+                self?.applyArtworkData(valid, token: token, title: title, artist: artist, source: "iTunes")
                 return
             }
 
