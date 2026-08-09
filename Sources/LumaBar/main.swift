@@ -1181,6 +1181,7 @@ private final class VoiceWhisperAudioSession: VoiceWhisperSession {
     }
 }
 
+#if LUMABAR_SPEECH_ANALYZER
 @available(macOS 26.0, *)
 private final class VoiceWhisperAudioFileSink: @unchecked Sendable {
     private var audioFile: AVAudioFile?
@@ -1363,6 +1364,8 @@ private final class VoiceWhisperAnalyzerSession: VoiceWhisperSession, @unchecked
         stop()
     }
 }
+
+#endif
 
 private struct AgentWorkspaceContext: Sendable {
     let appName: String
@@ -15546,6 +15549,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
 
         let audioSession: any VoiceWhisperSession
+        #if LUMABAR_SPEECH_ANALYZER
         if #available(macOS 26.0, *) {
             audioSession = VoiceWhisperAnalyzerSession(
                 onResult: onResult,
@@ -15571,6 +15575,19 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 onError: onError
             )
         }
+        #else
+        guard let recognizer = voiceSpeechRecognizer, recognizer.isAvailable else {
+            isVoiceWhisperRecording = false
+            agentStatus = "语音识别不可用"
+            agentResponse = VoiceWhisperError.speechUnavailable.localizedDescription
+            return
+        }
+        audioSession = VoiceWhisperAudioSession(
+            recognizer: recognizer,
+            onResult: onResult,
+            onError: onError
+        )
+        #endif
 
         do {
             try audioSession.start()

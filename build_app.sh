@@ -57,17 +57,29 @@ fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
+# SpeechAnalyzer / AssetInventory exist only in macOS 26+ SDKs.
+# CI Xcode 16 (macOS 15 SDK) falls back to SFSpeechRecognizer.
+SWIFT_BUILD_FLAGS=()
+SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version 2>/dev/null || true)"
+SDK_MAJOR="${SDK_VERSION%%.*}"
+if [[ -n "$SDK_MAJOR" && "$SDK_MAJOR" =~ ^[0-9]+$ && "$SDK_MAJOR" -ge 26 ]]; then
+  SWIFT_BUILD_FLAGS+=(-Xswiftc -DLUMABAR_SPEECH_ANALYZER)
+  echo "Enabling SpeechAnalyzer (SDK $SDK_VERSION)"
+else
+  echo "Using SFSpeechRecognizer fallback (SDK ${SDK_VERSION:-unknown})"
+fi
+
 if [[ "$BUILD_UNIVERSAL" == "1" ]]; then
   ARM64_TRIPLE="arm64-apple-macosx14.0"
   X86_64_TRIPLE="x86_64-apple-macosx14.0"
-  swift build -c release --triple "$ARM64_TRIPLE"
-  swift build -c release --triple "$X86_64_TRIPLE"
+  swift build -c release --triple "$ARM64_TRIPLE" "${SWIFT_BUILD_FLAGS[@]}"
+  swift build -c release --triple "$X86_64_TRIPLE" "${SWIFT_BUILD_FLAGS[@]}"
   ARM64_BIN="$(swift build -c release --triple "$ARM64_TRIPLE" --show-bin-path)/LumaBar"
   X86_64_BIN="$(swift build -c release --triple "$X86_64_TRIPLE" --show-bin-path)/LumaBar"
   /usr/bin/lipo -create "$ARM64_BIN" "$X86_64_BIN" -output "$APP/Contents/MacOS/LumaBar"
 else
-  swift build -c release
-  cp "$ROOT/.build/release/LumaBar" "$APP/Contents/MacOS/LumaBar"
+  swift build -c release "${SWIFT_BUILD_FLAGS[@]}"
+  cp "$(swift build -c release --show-bin-path)/LumaBar" "$APP/Contents/MacOS/LumaBar"
 fi
 
 cp "$ROOT/Support/Info.plist" "$APP/Contents/Info.plist"
