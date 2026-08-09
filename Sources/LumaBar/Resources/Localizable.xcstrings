@@ -1,0 +1,252 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "app.name" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Luma Bar" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Luma Bar" } }
+      }
+    },
+    "menu.theme" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Theme" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "主题" } }
+      }
+    },
+    "menu.show_main_panel" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show Main Panel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示主面板" } }
+      }
+    },
+    "menu.hide_main_panel" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hide Main Panel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "隐藏主面板" } }
+      }
+    },
+    "menu.permissions" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Permissions…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "权限设置…" } }
+      }
+    },
+    "menu.help" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Help & Shortcuts…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用指南与快捷键…" } }
+      }
+    },
+    "menu.about" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "About Luma Bar" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关于 Luma Bar" } }
+      }
+    },
+    "menu.quit" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Quit Luma Bar" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "退出 Luma Bar" } }
+      }
+    },
+    "menu.edit" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "编辑" } }
+      }
+    },
+    "menu.cut" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "剪切" } }
+      }
+    },
+    "menu.copy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "拷贝" } }
+      }
+    },
+    "menu.paste" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Paste" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "粘贴" } }
+      }
+    },
+    "menu.select_all" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Select All" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全选" } }
+      }
+    },
+    "about.version_format" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Version %@ (%@)\n\n%@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "版本 %@（%@）\n\n%@" } }
+      }
+    },
+    "help.window_title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Help & Shortcuts" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用指南" } }
+      }
+    },
+    "help.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Help" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用指南" } }
+      }
+    },
+    "help.subtitle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shortcuts and everyday actions" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "快捷键与常用操作速查" } }
+      }
+    },
+    "help.close" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Close" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关闭" } }
+      }
+    },
+    "help.section.shortcuts" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shortcuts" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "快捷键" } }
+      }
+    },
+    "help.section.features" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Features" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "核心功能" } }
+      }
+    },
+    "help.footer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This guide opens only when you ask for it — never on launch." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "本指南仅在你主动打开时出现，不会在启动时自动弹出。" } }
+      }
+    },
+    "help.shortcut.toggle_panel.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show / hide main panel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开 / 收起主面板" } }
+      }
+    },
+    "help.shortcut.toggle_panel.detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Summon the expanded panel anytime; press again to dismiss." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "随时呼出展开界面；再按一次即可收起。" } }
+      }
+    },
+    "help.shortcut.escape.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Collapse panel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "收起面板" } }
+      }
+    },
+    "help.shortcut.escape.detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Press Escape while expanded to return to the compact bar." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在展开状态下按下 Escape，立即回到紧凑条。" } }
+      }
+    },
+    "help.shortcut.shell.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Agent / Shell input" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Agent / Shell 输入" } }
+      }
+    },
+    "help.shortcut.shell.detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Expand and focus the Agent input field." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "展开并聚焦 Agent 输入框。" } }
+      }
+    },
+    "help.shortcut.voice.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Voice Whisper" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Voice Whisper" } }
+      }
+    },
+    "help.shortcut.voice.detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Start or stop speech-to-text into the Agent field." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开始或结束语音转写，内容写入 Agent 输入框。" } }
+      }
+    },
+    "help.shortcut.translate.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Selection translation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "划词翻译" } }
+      }
+    },
+    "help.shortcut.translate.detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hold Option and release a selection to translate (when enabled)." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按住 Option 并松开鼠标选区，触发翻译（需开启此功能）。" } }
+      }
+    },
+    "help.shortcut.theme.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Switch theme" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "切换主题" } }
+      }
+    },
+    "help.shortcut.theme.detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Quickly switch Void, Horizon, Aura, and other skins from Theme." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在菜单 Theme 中快速切换 Void、Horizon、Aura 等皮肤。" } }
+      }
+    },
+    "help.feature.hover.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hover to expand" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "悬停展开" } }
+      }
+    },
+    "help.feature.hover.detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Move the pointer to the notch / top bar to expand; move away to collapse." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "将指针移到刘海 / 顶栏区域，面板会自动展开；移开后收起。" } }
+      }
+    },
+    "help.feature.music.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Music & lyrics" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "音乐与歌词" } }
+      }
+    },
+    "help.feature.music.detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sync Apple Music / NetEase playback; expand for progress and lyrics." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "同步 Apple Music / 网易云播放状态，展开后可看进度与歌词。" } }
+      }
+    },
+    "help.feature.agent.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Agent assistant" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Agent 助手" } }
+      }
+    },
+    "help.feature.agent.detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Switch to Agent in the panel; use shortcuts or voice for confirmed local actions." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在展开面板中切换到 Agent，用快捷键或语音下达本地确认动作。" } }
+      }
+    },
+    "help.feature.pet.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Desktop companion" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "桌面伙伴" } }
+      }
+    },
+    "help.feature.pet.detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Some themes show a desktop pet; click for a short companion note." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "部分主题会显示桌面小宠物；点击可弹出一句陪伴提示。" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

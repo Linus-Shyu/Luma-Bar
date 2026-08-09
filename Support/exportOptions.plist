@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Developer ID outside-the-Mac-App-Store export.
+	  Path: Support/exportOptions.plist
+
+	  Replace YOUR_TEAM_ID with your 10-character Apple Team ID.
+	  Only used if/when you add an .xcodeproj and run:
+	    xcodebuild -exportArchive -exportOptionsPlist Support/exportOptions.plist ...
+	  Current Luma Bar CI builds via Package.swift + build_app.sh (no archive).
+	-->
+	<key>method</key>
+	<string>developer-id</string>
+	<key>teamID</key>
+	<string>YOUR_TEAM_ID</string>
+	<key>signingStyle</key>
+	<string>manual</string>
+	<key>signingCertificate</key>
+	<string>Developer ID Application</string>
+	<!-- Empty = let Xcode pick the matching Developer ID profile / identity. -->
+	<key>provisioningProfiles</key>
+	<dict/>
+	<key>destination</key>
+	<string>export</string>
+</dict>
+</plist>

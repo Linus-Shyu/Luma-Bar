@@ -14,6 +14,11 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>luma bar</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-Hans</string>
+	</array>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -37,7 +42,7 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>luma bar 仅在你启动 Voice Whisper（语音输入）时使用麦克风，用于把说话内容转成文字。</string>
+	<string>Luma Bar uses the microphone only when you start Voice Whisper, to turn speech into text.</string>
 	<key>NSNetworkVolumesUsageDescription</key>
 	<string>luma bar may access network volumes only for files you select or Agent actions you confirm.</string>
 	<key>NSPrincipalClass</key>
@@ -47,6 +52,6 @@
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>luma bar captures the active game window only when you request screenshot analysis.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>luma bar 仅在你启动 Voice Whisper 时使用语音识别，用于把说话内容转成文字。</string>
+	<string>Luma Bar uses speech recognition only when you start Voice Whisper, to turn speech into text.</string>
 </dict>
 </plist>

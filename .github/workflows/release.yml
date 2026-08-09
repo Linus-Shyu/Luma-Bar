@@ -1,0 +1,178 @@
+name: Release (Developer ID + Notarize)
+
+# Push an annotated tag like v0.3.4 / v1.0.0 to publish a notarized build.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  # --- Customize if you rename the product ---
+  APP_DISPLAY_NAME: luma bar.app
+  # Developer ID identity string must match the .p12 you upload as a secret.
+  # Example: Developer ID Application: Luma Bar Core Team (AB12CD34EF)
+  # Leave empty to auto-detect the first "Developer ID Application" in the CI keychain.
+  CODESIGN_IDENTITY: ""
+
+jobs:
+  release:
+    name: Build · Sign · Notarize
+    runs-on: macos-14
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          # Prefer a recent stable Xcode on the runner image.
+          if [[ -d "/Applications/Xcode_15.4.app" ]]; then
+            sudo xcode-select -s /Applications/Xcode_15.4.app
+          elif [[ -d "/Applications/Xcode_16.0.app" ]]; then
+            sudo xcode-select -s /Applications/Xcode_16.0.app
+          fi
+          xcodebuild -version
+          swift --version
+
+      - name: Sync marketing version from tag
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]]; then
+            echo "error: tag '$TAG' must look like v1.2.3" >&2
+            exit 1
+          fi
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Support/Info.plist
+          # Keep build number monotonic-ish: use run number when possible.
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Support/Info.plist
+          echo "Version → $VERSION (build ${{ github.run_number }})"
+
+      - name: Import Developer ID certificate into temporary keychain
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${BUILD_CERTIFICATE_BASE64:?missing secret BUILD_CERTIFICATE_BASE64}"
+          : "${P12_PASSWORD:?missing secret P12_PASSWORD}"
+          : "${KEYCHAIN_PASSWORD:?missing secret KEYCHAIN_PASSWORD}"
+
+          CERTIFICATE_PATH="${RUNNER_TEMP}/developer_id.p12"
+          KEYCHAIN_PATH="${RUNNER_TEMP}/luma-signing.keychain-db"
+
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -P "$P12_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          echo "Installed identities:"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Resolve codesign identity
+        id: identity
+        run: |
+          set -euo pipefail
+          if [[ -n "${CODESIGN_IDENTITY}" ]]; then
+            IDENTITY="$CODESIGN_IDENTITY"
+          else
+            IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/Developer ID Application:/ { print $2; exit }')"
+          fi
+          if [[ -z "$IDENTITY" ]]; then
+            echo "error: no Developer ID Application identity in keychain" >&2
+            security find-identity -v -p codesigning || true
+            exit 1
+          fi
+          echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
+          echo "Using: $IDENTITY"
+
+      - name: Write App Store Connect API key
+        env:
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: |
+          set -euo pipefail
+          : "${APPLE_API_KEY_BASE64:?missing secret APPLE_API_KEY_BASE64}"
+          : "${APPLE_API_KEY_ID:?missing secret APPLE_API_KEY_ID}"
+          KEY_PATH="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
+          echo -n "$APPLE_API_KEY_BASE64" | base64 --decode > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize, staple
+        env:
+          LUMA_BAR_CODESIGN_IDENTITY: ${{ steps.identity.outputs.identity }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          LUMA_BAR_BUILD_UNIVERSAL: "1"
+          LUMA_BAR_MAKE_DMG: "1"
+          LUMA_BAR_RELEASE_DIR: dist
+          LUMA_BAR_RELEASE_TAG: ${{ github.ref_name }}
+          # Optional: inject bundled Agent key only if you store it as a secret.
+          LUMA_BAR_DEEPSEEK_API_KEY: ${{ secrets.LUMA_BAR_DEEPSEEK_API_KEY }}
+        run: |
+          set -euo pipefail
+          : "${APPLE_API_KEY_PATH:?}"
+          : "${APPLE_API_KEY_ID:?missing secret APPLE_API_KEY_ID}"
+          : "${APPLE_API_ISSUER:?missing secret APPLE_API_ISSUER}"
+          chmod +x scripts/ci_release.sh build_app.sh
+          ./scripts/ci_release.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Luma-Bar-${{ github.ref_name }}
+          path: |
+            dist/*.zip
+            dist/*.dmg
+            dist/release-meta.txt
+            dist/luma bar.app
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Luma Bar ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.zip
+            dist/*.dmg
+          body: |
+            ## Luma Bar ${{ github.ref_name }}
+
+            Developer ID signed · notarized · stapled.
+
+            - Download the `.dmg` (preferred) or `.zip`
+            - Drag **luma bar.app** to Applications
+            - First launch may still ask for Accessibility / Automation / Microphone as designed
+
+            Built by GitHub Actions run ${{ github.run_id }}.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          set +e
+          security delete-keychain "${RUNNER_TEMP}/luma-signing.keychain-db" 2>/dev/null
+          rm -f "${RUNNER_TEMP}/developer_id.p12"
+          rm -f "${RUNNER_TEMP}/AuthKey_"*.p8

@@ -1,0 +1,13 @@
+/* Info.plist permission strings — Simplified Chinese */
+"NSAppleEventsUsageDescription" = "Luma Bar 需要通过 AppleScript 控制 Apple Music 和网易云音乐，以同步播放状态并显示歌词。";
+"NSContactsUsageDescription" = "仅在你让 Agent 给某人准备消息时，Luma Bar 才会查找联系人。";
+"NSDesktopFolderUsageDescription" = "Luma Bar 仅在访问你选择的文件或你确认的 Agent 操作时使用桌面。";
+"NSDocumentsFolderUsageDescription" = "Luma Bar 仅在访问你选择的文件或你确认的 Agent 操作时使用文稿。";
+"NSDownloadsFolderUsageDescription" = "Luma Bar 仅在访问你选择的文件或你确认的 Agent 操作时使用下载。";
+"NSMicrophoneUsageDescription" = "Luma Bar 仅在你启动 Voice Whisper（语音输入）时使用麦克风，用于把说话内容转成文字。";
+"NSNetworkVolumesUsageDescription" = "Luma Bar 仅在访问你选择的文件或你确认的 Agent 操作时使用网络卷。";
+"NSRemovableVolumesUsageDescription" = "Luma Bar 仅在访问你选择的文件或你确认的 Agent 操作时使用可移动卷。";
+"NSScreenCaptureUsageDescription" = "仅在你请求截图分析时，Luma Bar 才会捕获当前游戏窗口。";
+"NSSpeechRecognitionUsageDescription" = "Luma Bar 仅在你启动 Voice Whisper 时使用语音识别，用于把说话内容转成文字。";
+"CFBundleDisplayName" = "Luma Bar";
+"CFBundleName" = "Luma Bar";

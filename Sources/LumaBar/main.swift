@@ -132,9 +132,9 @@ enum ExclusiveAudioFocus {
         playPauseApplication(bundleIdentifier: appleMusicBundleIdentifier)
     }
 
-    // MARK: - NetEase force transport (AppleScript → System Events Space)
+    // MARK: - NetEase force transport (AppleScript → targeted Space, never activate)
 
-    /// Pause NetEase: one short AppleScript attempt, then optional Space.
+    /// Pause NetEase: AppleScript first, then a background Space key (no frontmost).
     /// - Important: Space **toggles**. If NetEase is already paused, Space would *resume* it
     ///   (ghost play). Only allow Space when the caller believes NetEase is currently playing.
     @discardableResult
@@ -143,16 +143,17 @@ enum ExclusiveAudioFocus {
             return true
         }
         guard likelyPlaying else { return false }
-        return sendNetEaseSpaceKeyViaSystemEvents()
+        return sendNetEaseSpaceKeyViaSystemEvents(bringToFront: false)
     }
 
-    /// Play NetEase: one AppleScript `play`, then Space (bring front) as last resort.
+    /// Play NetEase in the background — never activate / raise the NetEase window.
     @discardableResult
     nonisolated static func playNetEase() -> Bool {
         if playNetEaseOnceViaAppleScript() {
             return true
         }
-        return sendNetEaseSpaceKeyViaSystemEvents(bringToFront: true)
+        // Last resort: Space into the NetEase process without making it frontmost.
+        return sendNetEaseSpaceKeyViaSystemEvents(bringToFront: false)
     }
 
     /// Blocking exclusive handoff: silence every rival **before** the caller issues play.
@@ -175,15 +176,20 @@ enum ExclusiveAudioFocus {
     @discardableResult
     nonisolated static func playPauseNetEase() -> Bool {
         // Avoid playpause dictionary — same server-side rejection as pause on some playlists.
-        sendNetEaseSpaceKeyViaSystemEvents()
+        sendNetEaseSpaceKeyViaSystemEvents(bringToFront: false)
     }
 
-    /// Single AppleScript pause — on any error/timeout, caller must use Space (no second `pause`).
+    /// Single AppleScript pause — never `activate`; stay in background.
     nonisolated private static func pauseNetEaseOnceViaAppleScript() -> Bool {
         let script = """
         try
           with timeout of 0.5 seconds
-            tell application id "\(netEaseMusicBundleIdentifier)" to pause
+            tell application id "\(netEaseMusicBundleIdentifier)"
+              if it is running then
+                launch
+                pause
+              end if
+            end tell
           end timeout
           return "ok"
         on error
@@ -193,11 +199,17 @@ enum ExclusiveAudioFocus {
         return runAppleScript(script, wallTimeout: netEaseTier1WallTimeout)
     }
 
+    /// Single AppleScript play — `launch` keeps the app alive without raising its windows.
     nonisolated private static func playNetEaseOnceViaAppleScript() -> Bool {
         let script = """
         try
           with timeout of 0.5 seconds
-            tell application id "\(netEaseMusicBundleIdentifier)" to play
+            tell application id "\(netEaseMusicBundleIdentifier)"
+              if it is running then
+                launch
+                play
+              end if
+            end tell
           end timeout
           return "ok"
         on error
@@ -207,18 +219,28 @@ enum ExclusiveAudioFocus {
         return runAppleScript(script, wallTimeout: netEaseTier1WallTimeout)
     }
 
-    /// Physical Space into the NetEase process — bypasses broken AppleScript / remote-control handlers.
+    /// Space into the NetEase process without activating it.
+    /// Prefer `CGEvent.postToPid` so the key never requires `set frontmost to true`.
     @discardableResult
     nonisolated static func sendNetEaseSpaceKeyViaSystemEvents(bringToFront: Bool = false) -> Bool {
+        // bringToFront is intentionally ignored — raising NetEase steals focus from Luma Bar.
+        _ = bringToFront
+
         let apps = NSRunningApplication.runningApplications(
             withBundleIdentifier: netEaseMusicBundleIdentifier
         )
-        guard apps.contains(where: { !$0.isTerminated }) else {
+        guard let app = apps.first(where: { !$0.isTerminated }) else {
             return false
         }
 
-        let frontLine = bringToFront ? "set frontmost to true" : ""
-        // key code 49 = Space. Prefer bundle-id process lookup; fall back to process names.
+#if !LUMA_APP_STORE
+        // Best path: deliver Space directly to NetEase's PID (no activate / no frontmost).
+        if postSpaceKey(to: app.processIdentifier) {
+            return true
+        }
+#endif
+
+        // Fallback: System Events key code without ever setting frontmost.
         let script = """
         try
           with timeout of 1 seconds
@@ -226,21 +248,18 @@ enum ExclusiveAudioFocus {
               set procs to every process whose bundle identifier is "\(netEaseMusicBundleIdentifier)"
               if (count of procs) > 0 then
                 tell item 1 of procs
-                  \(frontLine)
                   key code 49
                 end tell
                 return "ok"
               end if
               if exists process "NetEaseMusic" then
                 tell process "NetEaseMusic"
-                  \(frontLine)
                   key code 49
                 end tell
                 return "ok"
               end if
               if exists process "NeteaseMusic" then
                 tell process "NeteaseMusic"
-                  \(frontLine)
                   key code 49
                 end tell
                 return "ok"
@@ -252,42 +271,27 @@ enum ExclusiveAudioFocus {
         end try
         error "no-netease-process"
         """
-        if runAppleScript(script, wallTimeout: 1.2) {
-            return true
-        }
-
-#if !LUMA_APP_STORE
-        let box = AppleScriptResultBox()
-        let semaphore = DispatchSemaphore(value: 0)
-        DispatchQueue.main.async {
-            let previous = NSWorkspace.shared.frontmostApplication
-            if let app = NSRunningApplication.runningApplications(
-                withBundleIdentifier: netEaseMusicBundleIdentifier
-            ).first(where: { !$0.isTerminated }) {
-                _ = app.activate()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    box.success = postSpaceKeyCGEvent()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        if !bringToFront {
-                            _ = previous?.activate()
-                        }
-                        semaphore.signal()
-                    }
-                }
-            } else {
-                semaphore.signal()
-            }
-        }
-        _ = semaphore.wait(timeout: .now() + 1.2)
-        return box.success
-#else
-        return false
-#endif
+        return runAppleScript(script, wallTimeout: 1.2)
     }
 
 #if !LUMA_APP_STORE
-    nonisolated private static func postSpaceKeyCGEvent() -> Bool {
+    /// Post Space to a specific PID so NetEase can toggle playback without becoming frontmost.
+    nonisolated private static func postSpaceKey(to pid: pid_t) -> Bool {
         let spaceKey: CGKeyCode = 49 // kVK_Space
+        guard let source = CGEventSource(stateID: .combinedSessionState),
+              let keyDown = CGEvent(keyboardEventSource: source, virtualKey: spaceKey, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: spaceKey, keyDown: false)
+        else {
+            return false
+        }
+        keyDown.postToPid(pid)
+        keyUp.postToPid(pid)
+        return true
+    }
+
+    nonisolated private static func postSpaceKeyCGEvent() -> Bool {
+        // Legacy global tap — only used if a caller still references it; prefer postToPid.
+        let spaceKey: CGKeyCode = 49
         guard let source = CGEventSource(stateID: .combinedSessionState),
               let keyDown = CGEvent(keyboardEventSource: source, virtualKey: spaceKey, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: spaceKey, keyDown: false)
@@ -496,77 +500,90 @@ enum IslandContentMode: String, CaseIterable {
 }
 
 enum IslandTheme: String, CaseIterable {
-    case bar
-    case mistBlue
-    case adventureX
-    case eightBit
-    case pixelConsole
-    case pixelCat
-    case liquidGlass
+    case void
+    case horizon
+    case forge
+    case grid
+    case arcade
+    case nook
+    case aura
 
     private static let defaultsKey = "LumaBar.theme"
 
     static var saved: IslandTheme {
-        guard
-            let rawValue = UserDefaults.standard.string(forKey: defaultsKey),
-            let theme = IslandTheme(rawValue: rawValue)
-        else {
-            return .bar
+        guard let rawValue = UserDefaults.standard.string(forKey: defaultsKey) else {
+            return .void
         }
-        return theme
+        if let theme = IslandTheme(rawValue: rawValue) {
+            return theme
+        }
+        // Migrate pre–Scheme B identifiers (and keep pets on the same skins).
+        let migrated: IslandTheme
+        switch rawValue {
+        case "bar": migrated = .void
+        case "mistBlue": migrated = .horizon
+        case "adventureX": migrated = .forge
+        case "eightBit": migrated = .grid
+        case "pixelConsole": migrated = .arcade
+        case "pixelCat": migrated = .nook
+        case "liquidGlass": migrated = .aura
+        default: return .void
+        }
+        migrated.persist()
+        return migrated
     }
 
     var displayName: String {
         switch self {
-        case .bar:
-            return "Bar"
-        case .mistBlue:
-            return "Mist Blue"
-        case .adventureX:
-            return "AdventureX"
-        case .eightBit:
-            return "8-Bit"
-        case .pixelConsole:
-            return "Pixel Console"
-        case .pixelCat:
-            return "Pixel Cat"
-        case .liquidGlass:
-            return "Liquid Glass"
+        case .void:
+            return "Void"
+        case .horizon:
+            return "Horizon"
+        case .forge:
+            return "Forge"
+        case .grid:
+            return "Grid"
+        case .arcade:
+            return "Arcade"
+        case .nook:
+            return "Nook"
+        case .aura:
+            return "Aura"
         }
     }
 
-    var isEightBit: Bool {
-        self == .eightBit
+    var isGrid: Bool {
+        self == .grid
     }
 
-    var isPixelConsole: Bool {
-        self == .pixelConsole
+    var isArcade: Bool {
+        self == .arcade
     }
 
-    var isPixelCat: Bool {
-        self == .pixelCat
+    var isNook: Bool {
+        self == .nook
     }
 
-    var isAdventureX: Bool {
-        self == .adventureX
+    var isForge: Bool {
+        self == .forge
     }
 
     var isLight: Bool {
-        self == .mistBlue || self == .adventureX || self == .pixelCat
+        self == .horizon || self == .forge || self == .nook
     }
 
     var showsDesktopPet: Bool {
-        self == .mistBlue || isPixelConsole || isPixelCat
+        self == .horizon || isArcade || isNook
     }
 
     var desktopPetName: String {
         switch self {
-        case .mistBlue:
-            return "Mist Blue panda"
-        case .pixelCat:
-            return "Pixel Cat companion"
-        case .pixelConsole:
-            return "Pixel Dog companion"
+        case .horizon:
+            return "Panda"
+        case .nook:
+            return "Mochi"
+        case .arcade:
+            return "Pup"
         default:
             return "Desktop companion"
         }
@@ -574,7 +591,7 @@ enum IslandTheme: String, CaseIterable {
 
     var desktopPetMessages: [String] {
         switch self {
-        case .mistBlue:
+        case .horizon:
             return [
                 "慢慢来，今天也要稳稳地。",
                 "休息一下，看看远处吧。",
@@ -589,7 +606,7 @@ enum IslandTheme: String, CaseIterable {
                 "你处理问题的方式好沉稳，学到了。",
                 "有你在，什么难题都能搞定。"
             ]
-        case .pixelCat:
+        case .nook:
             return [
                 "喵，今天想听哪一首？",
                 "这首不错，尾巴都跟着摇了。",
@@ -604,7 +621,7 @@ enum IslandTheme: String, CaseIterable {
                 "你刚才那操作，帅到尾巴竖起来了。",
                 "能陪这么聪明的你，猫猫超有面子的。"
             ]
-        case .pixelConsole:
+        case .arcade:
             return [
                 "汪！今天要先做哪件事？",
                 "换首歌吧，我已经开始摇尾巴了。",
@@ -626,8 +643,8 @@ enum IslandTheme: String, CaseIterable {
 
     var isPixelStyled: Bool {
         switch self {
-        case .adventureX, .eightBit, .pixelConsole: return true
-        case .bar, .mistBlue, .pixelCat, .liquidGlass: return false
+        case .forge, .grid, .arcade: return true
+        case .void, .horizon, .nook, .aura: return false
         }
     }
 
@@ -636,18 +653,18 @@ enum IslandTheme: String, CaseIterable {
     var usesBackdropMaterial: Bool { false }
 
     var fontDesign: Font.Design {
-        isPixelStyled && !isPixelCat ? .monospaced : .rounded
+        isPixelStyled && !isNook ? .monospaced : .rounded
     }
 
     func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        if isAdventureX, AdventureXPixelFont.isAvailable {
+        if isForge, AdventureXPixelFont.isAvailable {
             return .custom(AdventureXPixelFont.primaryPostScriptName, size: size)
         }
         return .system(size: size, weight: weight, design: fontDesign)
     }
 
     func nsFont(size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
-        if isAdventureX, let font = AdventureXPixelFont.nsFont(size: size) {
+        if isForge, let font = AdventureXPixelFont.nsFont(size: size) {
             return font
         }
         return .systemFont(ofSize: size, weight: weight)
@@ -659,67 +676,67 @@ enum IslandTheme: String, CaseIterable {
 
     var expandedCornerRadius: CGFloat {
         switch self {
-        case .bar, .mistBlue, .pixelConsole, .pixelCat, .adventureX: return NotchMetrics.expandedCornerRadius
-        case .liquidGlass: return 28
-        case .eightBit: return 4
+        case .void, .horizon, .arcade, .nook, .forge: return NotchMetrics.expandedCornerRadius
+        case .aura: return 28
+        case .grid: return 4
         }
     }
 
     var cardCornerRadius: CGFloat {
         switch self {
-        case .bar, .mistBlue, .pixelConsole: return 11
-        case .pixelCat: return 14
-        case .adventureX: return 5
-        case .eightBit: return 2
-        case .liquidGlass: return 16
+        case .void, .horizon, .arcade: return 11
+        case .nook: return 14
+        case .forge: return 5
+        case .grid: return 2
+        case .aura: return 16
         }
     }
 
     var controlCornerRadius: CGFloat {
         switch self {
-        case .bar, .mistBlue, .pixelConsole, .pixelCat, .liquidGlass: return 999
-        case .adventureX: return 3
-        case .eightBit: return 2
+        case .void, .horizon, .arcade, .nook, .aura: return 999
+        case .forge: return 3
+        case .grid: return 2
         }
     }
 
     var fieldCornerRadius: CGFloat {
         switch self {
-        case .bar, .mistBlue, .pixelConsole: return 8
-        case .pixelCat: return 10
-        case .adventureX: return 3
-        case .eightBit: return 2
-        case .liquidGlass: return 12
+        case .void, .horizon, .arcade: return 8
+        case .nook: return 10
+        case .forge: return 3
+        case .grid: return 2
+        case .aura: return 12
         }
     }
 
     var tokenOverlayCornerRadius: CGFloat {
         switch self {
-        case .bar: return NotchMetrics.codexTokenCornerRadius
-        case .mistBlue: return NotchMetrics.codexTokenCornerRadius
-        case .adventureX: return 5
-        case .eightBit: return 4
-        case .pixelConsole: return 18
-        case .pixelCat: return 22
-        case .liquidGlass: return 28
+        case .void: return NotchMetrics.codexTokenCornerRadius
+        case .horizon: return NotchMetrics.codexTokenCornerRadius
+        case .forge: return 5
+        case .grid: return 4
+        case .arcade: return 18
+        case .nook: return 22
+        case .aura: return 28
         }
     }
 
     var primaryAccent: Color {
         switch self {
-        case .bar:
+        case .void:
             return Color.islandTangerine
-        case .mistBlue:
+        case .horizon:
             return Color(red: 0.392, green: 0.678, blue: 0.941)
-        case .adventureX:
+        case .forge:
             return Color(red: 0.843, green: 0.353, blue: 0.153)
-        case .eightBit:
+        case .grid:
             return Color(red: 1.0, green: 0.82, blue: 0.40)
-        case .pixelConsole:
+        case .arcade:
             return Color(red: 1.0, green: 0.70, blue: 0.31)
-        case .pixelCat:
+        case .nook:
             return Color(red: 0.855, green: 0.498, blue: 0.337)
-        case .liquidGlass:
+        case .aura:
             // Pearl specular accent (visionOS glass highlight family).
             return Color(red: 0.86, green: 0.93, blue: 0.98)
         }
@@ -727,51 +744,51 @@ enum IslandTheme: String, CaseIterable {
 
     var activityAccent: Color {
         switch self {
-        case .bar:
+        case .void:
             return Color.islandGreen
-        case .mistBlue:
+        case .horizon:
             return Color(red: 0.282, green: 0.784, blue: 0.545)
-        case .adventureX:
+        case .forge:
             return Color(red: 0.176, green: 0.439, blue: 0.286)
-        case .eightBit, .pixelConsole:
+        case .grid, .arcade:
             return Color(red: 0.32, green: 0.95, blue: 0.46)
-        case .pixelCat:
+        case .nook:
             return Color(red: 0.929, green: 0.675, blue: 0.463)
-        case .liquidGlass:
+        case .aura:
             return Color(red: 0.72, green: 0.90, blue: 0.98)
         }
     }
 
     var pixelBorder: Color {
         switch self {
-        case .pixelConsole:
+        case .arcade:
             return Color(red: 0.33, green: 0.37, blue: 0.61)
-        case .pixelCat:
+        case .nook:
             return Color(red: 0.835, green: 0.722, blue: 0.663)
-        case .bar, .eightBit:
+        case .void, .grid:
             return Color(red: 0.33, green: 0.96, blue: 0.78)
-        case .mistBlue:
+        case .horizon:
             return Color(red: 0.392, green: 0.592, blue: 0.788)
-        case .adventureX:
+        case .forge:
             return Color(red: 0.212, green: 0.243, blue: 0.204)
-        case .liquidGlass:
+        case .aura:
             return Color.white.opacity(0.42)
         }
     }
 
     var pixelControlFill: Color {
         switch self {
-        case .pixelConsole:
+        case .arcade:
             return Color(red: 0.15, green: 0.18, blue: 0.30)
-        case .pixelCat:
+        case .nook:
             return Color(red: 0.969, green: 0.925, blue: 0.886)
-        case .bar, .eightBit:
+        case .void, .grid:
             return pixelBorder.opacity(0.1)
-        case .mistBlue:
+        case .horizon:
             return Color(red: 0.929, green: 0.969, blue: 1.0)
-        case .adventureX:
+        case .forge:
             return Color(red: 0.784, green: 0.745, blue: 0.647)
-        case .liquidGlass:
+        case .aura:
             return Color.white.opacity(0.16)
         }
     }
@@ -781,13 +798,13 @@ enum IslandTheme: String, CaseIterable {
     }
 
     var foregroundColor: Color {
-        if isAdventureX {
+        if isForge {
             return Color(red: 0.153, green: 0.212, blue: 0.173)
         }
-        if isPixelCat {
+        if isNook {
             return Color(red: 0.204, green: 0.165, blue: 0.153)
         }
-        if self == .liquidGlass {
+        if self == .aura {
             return Color(red: 0.94, green: 0.98, blue: 1.0)
         }
         return isLight
@@ -796,13 +813,13 @@ enum IslandTheme: String, CaseIterable {
     }
 
     var mutedForegroundColor: Color {
-        if isAdventureX {
+        if isForge {
             return Color(red: 0.424, green: 0.412, blue: 0.341)
         }
-        if isPixelCat {
+        if isNook {
             return Color(red: 0.455, green: 0.404, blue: 0.38)
         }
-        if self == .liquidGlass {
+        if self == .aura {
             return Color(red: 0.78, green: 0.90, blue: 0.96)
         }
         return isLight
@@ -819,13 +836,13 @@ enum IslandTheme: String, CaseIterable {
     }
 
     var subtleFill: Color {
-        if isAdventureX {
+        if isForge {
             return Color(red: 0.914, green: 0.875, blue: 0.788).opacity(0.92)
         }
-        if isPixelCat {
+        if isNook {
             return Color.white.opacity(0.48)
         }
-        if self == .liquidGlass {
+        if self == .aura {
             return Color.white.opacity(0.12)
         }
         return isLight
@@ -834,10 +851,10 @@ enum IslandTheme: String, CaseIterable {
     }
 
     var controlFill: Color {
-        if isPixelCat {
+        if isNook {
             return Color.white.opacity(0.52)
         }
-        if self == .liquidGlass {
+        if self == .aura {
             return Color.white.opacity(0.18)
         }
         return isPixelStyled ? pixelControlFill : (isLight ? primaryAccent.opacity(0.12) : Color.white.opacity(0.08))
@@ -852,10 +869,10 @@ enum IslandTheme: String, CaseIterable {
     }
 
     var separatorColor: Color {
-        if self == .liquidGlass {
+        if self == .aura {
             return Color.white.opacity(0.22)
         }
-        return isPixelCat
+        return isNook
             ? pixelBorder.opacity(0.34)
             : (isLight ? pixelBorder.opacity(0.2) : Color.white.opacity(0.1))
     }
@@ -898,7 +915,7 @@ private enum AdventureXPixelFont {
 }
 
 private struct IslandThemeEnvironmentKey: EnvironmentKey {
-    static let defaultValue = IslandTheme.bar
+    static let defaultValue = IslandTheme.void
 }
 
 extension EnvironmentValues {
@@ -6173,8 +6190,12 @@ final class IslandPanel: NSPanel {
     var immediateActions: [(rect: NSRect, action: IslandPanelAction)] = []
     weak var actionHandler: IslandPanelActionHandling?
 
-    /// Never become key/main — focus transitions flip AppKit into the gray inactive render path.
-    override var canBecomeKey: Bool { false }
+    /// When true, the expanded Agent / settings surface can take keyboard focus for TextFields.
+    /// Compact notch panels keep this false so the glass chrome never flips to the inactive gray path.
+    var allowsKeyboardFocus = false
+
+    /// Key only when Agent typing (or similar) needs a first responder.
+    override var canBecomeKey: Bool { allowsKeyboardFocus }
     override var canBecomeMain: Bool { false }
 
     /// Never let WindowServer restore off-screen frame snapshots across Spaces (causes expand/pet flash).
@@ -6242,11 +6263,19 @@ final class IslandPanel: NSPanel {
         if animationBehavior != .none { animationBehavior = .none }
         if abs(alphaValue - 1) > 0.001 { super.alphaValue = 1 }
         if !isExcludedFromWindowsMenu { isExcludedFromWindowsMenu = true }
-        let desiredMask: NSWindow.StyleMask = [.borderless, .fullSizeContentView, .nonactivatingPanel]
+        // Agent typing needs an activatable key window. Keep `.nonactivatingPanel` only for
+        // compact notch chrome so hover-expand never steals focus from the frontmost app.
+        let desiredMask: NSWindow.StyleMask = allowsKeyboardFocus
+            ? [.borderless, .fullSizeContentView]
+            : [.borderless, .fullSizeContentView, .nonactivatingPanel]
         if styleMask != desiredMask {
             styleMask = desiredMask
         }
-        if !becomesKeyOnlyIfNeeded { becomesKeyOnlyIfNeeded = true }
+        if allowsKeyboardFocus {
+            if becomesKeyOnlyIfNeeded { becomesKeyOnlyIfNeeded = false }
+        } else if !becomesKeyOnlyIfNeeded {
+            becomesKeyOnlyIfNeeded = true
+        }
         let desiredBehavior: NSWindow.CollectionBehavior = [
             .canJoinAllSpaces,
             .fullScreenAuxiliary,
@@ -6309,8 +6338,13 @@ final class IslandPanel: NSPanel {
             view.layer?.isOpaque = false
         }
 
-        // Kill any leftover system material views — never let AppKit gray-composite them.
-        if view is NSVisualEffectView {
+        // Kill leftover system material views — never let AppKit gray-composite them.
+        // Aura glass is intentional behind-window material; keep it alive and forced active.
+        if let aura = view as? AuraGlassEffectView {
+            aura.isHidden = false
+            aura.alphaValue = 1
+            aura.lockActiveGlass()
+        } else if view is NSVisualEffectView {
             view.isHidden = true
             view.alphaValue = 0
             view.wantsLayer = true
@@ -6357,7 +6391,8 @@ final class IslandPanel: NSPanel {
                 return
             }
 
-            // Do not makeKey — canBecomeKey is false so focus never changes glass style.
+            // Keep chrome locked; when keyboard focus is allowed, still pass the click through
+            // so NSTextField / SecureField can become first responder.
             lockTransparentRenderChrome()
         }
 
@@ -6502,6 +6537,7 @@ extension Notification.Name {
 }
 
 /// Hardcoded layer fill — no NSVisualEffectView / system materials (those gray out on unfocus).
+/// Non-Aura themes keep this path. Aura uses `AuraGlassBackdrop` instead.
 struct VisualEffectBackground: NSViewRepresentable {
     /// Legacy unused — call sites still pass material/blending; ignored.
     var material: NSVisualEffectView.Material = .hudWindow
@@ -6530,6 +6566,139 @@ struct VisualEffectBackground: NSViewRepresentable {
         _ = blendingMode
         _ = isEmphasized
         _ = appearanceName
+    }
+}
+
+/// Aura-only: real behind-window glass that mirrors wallpaper / windows underneath.
+/// Forces `.active` so non-key island panels do not milk into inactive gray.
+struct AuraGlassBackdrop: NSViewRepresentable {
+    var cornerRadius: CGFloat = 16
+    /// Prefer the thinnest HUD glass; `.popover` is a touch denser if needed.
+    var material: NSVisualEffectView.Material = .hudWindow
+
+    func makeNSView(context: Context) -> AuraGlassEffectView {
+        let view = AuraGlassEffectView()
+        apply(to: view)
+        return view
+    }
+
+    func updateNSView(_ view: AuraGlassEffectView, context: Context) {
+        apply(to: view)
+    }
+
+    private func apply(to view: AuraGlassEffectView) {
+        view.material = material
+        view.blendingMode = .behindWindow
+        view.state = .active
+        view.isEmphasized = true
+        view.cornerRadius = cornerRadius
+        view.lockActiveGlass()
+    }
+}
+
+/// System material glass for Aura. Keeps Space-transition cover without falling back to solid gray fill.
+final class AuraGlassEffectView: NSVisualEffectView {
+    var cornerRadius: CGFloat = 0 {
+        didSet { lockActiveGlass() }
+    }
+
+    private let spaceTransitionCover: NSView = {
+        let view = NSView(frame: .zero)
+        view.wantsLayer = true
+        view.layer?.masksToBounds = true
+        view.isHidden = true
+        view.autoresizingMask = [.width, .height]
+        return view
+    }()
+
+    private nonisolated(unsafe) var spaceCoverObserver: NSObjectProtocol?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        commonInit()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        commonInit()
+    }
+
+    private func commonInit() {
+        material = .hudWindow
+        blendingMode = .behindWindow
+        state = .active
+        isEmphasized = true
+        wantsLayer = true
+        lockActiveGlass()
+        spaceTransitionCover.frame = bounds
+        addSubview(spaceTransitionCover)
+
+        spaceCoverObserver = NotificationCenter.default.addObserver(
+            forName: .lumaBarSpaceTransitionGlassCover,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let visible = (notification.userInfo?["visible"] as? Bool) ?? false
+            let isDark = (notification.userInfo?["isDark"] as? Bool)
+            DispatchQueue.main.async {
+                self?.setSpaceTransitionCoverVisible(visible, isDark: isDark)
+            }
+        }
+    }
+
+    deinit {
+        if let spaceCoverObserver {
+            NotificationCenter.default.removeObserver(spaceCoverObserver)
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        lockActiveGlass()
+    }
+
+    override func layout() {
+        super.layout()
+        spaceTransitionCover.frame = bounds
+        spaceTransitionCover.layer?.cornerRadius = cornerRadius
+        spaceTransitionCover.layer?.cornerCurve = .continuous
+        lockActiveGlass()
+    }
+
+    /// Keep vibrancy alive even when the island panel is non-key / inactive.
+    func lockActiveGlass() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if state != .active { state = .active }
+        if blendingMode != .behindWindow { blendingMode = .behindWindow }
+        isEmphasized = true
+        wantsLayer = true
+        if let layer {
+            layer.masksToBounds = cornerRadius > 0
+            layer.cornerRadius = cornerRadius
+            layer.cornerCurve = .continuous
+            layer.isOpaque = false
+            // Never paint an opaque fill over the material.
+            if layer.backgroundColor != nil {
+                layer.backgroundColor = nil
+            }
+        }
+        CATransaction.commit()
+    }
+
+    func setSpaceTransitionCoverVisible(_ visible: Bool, isDark: Bool? = nil) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        spaceTransitionCover.layer?.cornerRadius = cornerRadius
+        spaceTransitionCover.layer?.cornerCurve = .continuous
+        spaceTransitionCover.layer?.backgroundColor = LockedClearBackgroundView.coverColorForAura(isDark: isDark).cgColor
+        spaceTransitionCover.frame = bounds
+        spaceTransitionCover.isHidden = !visible
+        if visible {
+            spaceTransitionCover.layer?.zPosition = 10_000
+            addSubview(spaceTransitionCover)
+        }
+        CATransaction.commit()
     }
 }
 
@@ -6628,6 +6797,11 @@ final class LockedClearBackgroundView: NSView {
     }
 
     private static func coverColor(isDark: Bool?) -> NSColor {
+        coverColorForAura(isDark: isDark)
+    }
+
+    /// Shared with Aura glass Space-transition cover.
+    static func coverColorForAura(isDark: Bool?) -> NSColor {
         let dark: Bool
         if let isDark {
             dark = isDark
@@ -6701,23 +6875,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     private var desktopPetWindow: IslandPanel?
     private var desktopPetBubbleWindow: IslandPanel?
     private var fullScreenCompletionToastWindow: IslandPanel?
-    private var barThemeMenuItem: NSMenuItem?
-    private var mistBlueThemeMenuItem: NSMenuItem?
-    private var adventureXThemeMenuItem: NSMenuItem?
-    private var eightBitThemeMenuItem: NSMenuItem?
-    private var pixelConsoleThemeMenuItem: NSMenuItem?
-    private var pixelCatThemeMenuItem: NSMenuItem?
-    private var liquidGlassThemeMenuItem: NSMenuItem?
     private var selectionTranslationMenuItem: NSMenuItem?
     private var statusItem: NSStatusItem?
-    private var statusBarThemeMenuItem: NSMenuItem?
-    private var statusMistBlueThemeMenuItem: NSMenuItem?
-    private var statusAdventureXThemeMenuItem: NSMenuItem?
-    private var statusEightBitThemeMenuItem: NSMenuItem?
-    private var statusPixelConsoleThemeMenuItem: NSMenuItem?
-    private var statusPixelCatThemeMenuItem: NSMenuItem?
-    private var statusLiquidGlassThemeMenuItem: NSMenuItem?
     private var statusSelectionTranslationMenuItem: NSMenuItem?
+    private let menuBuilder = LumaBarMenuBuilder()
     private var permissionWindow: NSWindow?
     private var permissionOnboardingModel: PermissionOnboardingModel?
     private var visibilityTimer: Timer?
@@ -6748,7 +6909,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     private var fullScreenHideWorkItem: DispatchWorkItem?
     private var shellPromptHotKeys: [GlobalHotKey] = []
     private var voiceWhisperHotKey: GlobalHotKey?
+    private var mainPanelHotKey: GlobalHotKey?
     private var lastShellPromptHotKeyAt = Date.distantPast
+    private var lastMainPanelHotKeyAt = Date.distantPast
     private var selectionMouseDownPoint: NSPoint?
     private var selectionMouseDownHeldOption = false
     private var selectionTranslationWorkItem: DispatchWorkItem?
@@ -6850,6 +7013,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             installShellPromptHotKey()
         }
         installVoiceWhisperHotKey()
+        installMainPanelHotKey()
         installApplicationContextObserver()
         beginLicensedSession()
         model.applyActiveApplication(NSWorkspace.shared.frontmostApplication)
@@ -6881,6 +7045,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                         self.model.suppressTransientIslandSurfaces = false
                     }
                 }
+                self.menuBuilder.updatePanelVisibility(isExpanded: isExpanded)
                 // Space settle / suppress windows: snap visibility — never animate expand/collapse.
                 let animated = !self.isSpaceTransitionPending
                     && Date() >= self.suppressExpandedPanelUntil
@@ -7020,6 +7185,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         removeApplicationContextObserver()
         shellPromptHotKeys.removeAll()
         voiceWhisperHotKey = nil
+        mainPanelHotKey = nil
+        HelpGuidePresenter.close()
         if let statusItem {
             NSStatusBar.system.removeStatusItem(statusItem)
         }
@@ -7456,24 +7623,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     private func installShellPromptHotKey() {
-        let bindings: [(id: UInt32, keyCode: UInt32, label: String)] = [
-            (1, UInt32(kVK_Return), "Shell Prompt primary hotkey (Command-Shift-Return)"),
-            (3, UInt32(kVK_ANSI_A), "Shell Prompt legacy hotkey (Command-Shift-A)")
-        ]
-
-        shellPromptHotKeys = bindings.map { binding in
-            GlobalHotKey(
-                signature: GlobalHotKey.fourCharacterCode("LBSH"),
-                id: binding.id,
-                keyCode: binding.keyCode,
-                modifiers: UInt32(cmdKey | shiftKey)
-            ) { [weak self] in
-                self?.handleShellPromptHotKey()
-            }
+        let hotKey = GlobalHotKey(
+            signature: GlobalHotKey.fourCharacterCode("LBSH"),
+            id: 1,
+            keyCode: UInt32(kVK_Return),
+            modifiers: UInt32(cmdKey | shiftKey)
+        ) { [weak self] in
+            self?.handleShellPromptHotKey()
         }
+        shellPromptHotKeys = [hotKey]
 
-        for (binding, hotKey) in zip(bindings, shellPromptHotKeys) where hotKey.registrationStatus != noErr {
-            NSLog("luma bar failed to register \(binding.label): \(hotKey.registrationStatus)")
+        if hotKey.registrationStatus != noErr {
+            NSLog("luma bar failed to register Shell Prompt hotkey (Command-Shift-Return): \(hotKey.registrationStatus)")
         }
     }
 
@@ -7489,6 +7650,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
         if voiceWhisperHotKey?.registrationStatus != noErr {
             NSLog("luma bar failed to register Voice Whisper hotkey: \(voiceWhisperHotKey?.registrationStatus ?? -1)")
+        }
+    }
+
+    private func installMainPanelHotKey() {
+        // ⌘⇧Space often collides with input-source / system bindings; ⌘⇧L is reserved for Luma.
+        mainPanelHotKey = GlobalHotKey(
+            signature: GlobalHotKey.fourCharacterCode("LBMP"),
+            id: 4,
+            keyCode: UInt32(kVK_ANSI_L),
+            modifiers: UInt32(cmdKey | shiftKey)
+        ) { [weak self] in
+            self?.handleMainPanelHotKey()
+        }
+
+        if mainPanelHotKey?.registrationStatus != noErr {
+            NSLog("luma bar failed to register main panel hotkey (Command-Shift-L): \(mainPanelHotKey?.registrationStatus ?? -1)")
+        }
+    }
+
+    private func handleMainPanelHotKey() {
+        let now = Date()
+        guard now.timeIntervalSince(lastMainPanelHotKeyAt) >= 0.35 else { return }
+        lastMainPanelHotKeyAt = now
+
+        prepareExplicitExpandedPanelRequest()
+
+        if model.isExpanded {
+            collapseExpandedPanel()
+            return
+        }
+
+        isExpandedByBarHover = false
+        model.isExpanded = true
+        refreshInteractiveHitRegions()
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let expandedWindow = self.expandedWindow else { return }
+            self.activateForUserInteraction(panel: expandedWindow)
         }
     }
 
@@ -8021,7 +8220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         hideSpaceTransitionGlassCoverWorkItem?.cancel()
         hideSpaceTransitionGlassCoverWorkItem = nil
         // Prefer theme-aware flat color so Liquid Glass / dark skins don't flash white.
-        let isDark = !model.theme.isLight || model.theme == .liquidGlass || model.theme == .bar
+        let isDark = !model.theme.isLight || model.theme == .aura || model.theme == .void
         NotificationCenter.default.post(
             name: .lumaBarSpaceTransitionGlassCover,
             object: nil,
@@ -8231,10 +8430,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
     private func refreshVisualEffectViews(in root: NSView?) {
         guard let root else { return }
-        if let locked = root as? LockedClearBackgroundView {
+        if let aura = root as? AuraGlassEffectView {
+            aura.isHidden = false
+            aura.alphaValue = 1
+            aura.lockActiveGlass()
+        } else if let locked = root as? LockedClearBackgroundView {
             locked.lockFixedLayer()
         } else if root is NSVisualEffectView {
-            // Should never remain — neutralize any stray system material view.
+            // Neutralize non-Aura system material views (they milk gray when inactive).
             root.isHidden = true
             root.alphaValue = 0
             root.wantsLayer = true
@@ -8421,7 +8624,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         hostingView.layer?.cornerRadius = model.usesCompactExpandedOverlay
             ? model.theme.tokenOverlayCornerRadius
             : model.theme.expandedCornerRadius
-        hostingView.layer?.cornerCurve = model.theme.isEightBit ? .circular : .continuous
+        hostingView.layer?.cornerCurve = model.theme.isGrid ? .circular : .continuous
         // Layer-backed fixed fills; clipping is safe (no backdrop material sampling).
         hostingView.layer?.masksToBounds = true
         hostingView.layer?.isOpaque = false
@@ -8623,7 +8826,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         if desktopPetBubbleWindow == nil {
             desktopPetBubbleWindow = makePanel(
                 frame: frame,
-                title: "Pixel Console Companion Message",
+                title: "Luma Companion Message",
                 rootView: PixelCompanionSpeechBubble(text: message, tailOnRight: placement.tailOnRight)
                     .frame(width: frame.width, height: frame.height)
                     .environment(\.islandTheme, theme)
@@ -8878,12 +9081,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         expandedWindow.contentView = makeExpandedHostingView()
         expandedWindow.contentView?.updateTrackingAreas()
 
-        // IslandPanel.canBecomeKey == false → makeKeyAndOrderFront is unreliable after orderOut.
-        // Always use orderFrontRegardless for repeatable hover expand.
+        // IslandPanel: use makeKey when Agent keyboard input is needed; otherwise
+        // orderFrontRegardless keeps hover expand reliable without activating chrome.
+        let bringFront: () -> Void = {
+            if expandedWindow.allowsKeyboardFocus {
+                expandedWindow.makeKeyAndOrderFront(nil)
+            } else {
+                expandedWindow.orderFrontRegardless()
+            }
+        }
         if model.usesCompactExpandedOverlay {
             if animated {
                 expandedWindow.alphaValue = 0
-                expandedWindow.orderFrontRegardless()
+                bringFront()
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = 0.16
                     context.allowsImplicitAnimation = true
@@ -8891,14 +9101,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                 }
             } else {
                 expandedWindow.alphaValue = 1
-                expandedWindow.orderFrontRegardless()
+                bringFront()
             }
             return
         }
 
         if animated {
             expandedWindow.alphaValue = 0
-            expandedWindow.orderFrontRegardless()
+            bringFront()
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.16
                 context.allowsImplicitAnimation = true
@@ -8906,7 +9116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             }
         } else {
             expandedWindow.alphaValue = 1
-            expandedWindow.orderFrontRegardless()
+            bringFront()
         }
     }
 
@@ -8978,15 +9188,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             }
         case .showMusic:
             expandedWindow?.makeFirstResponder(nil)
+            expandedWindow?.allowsKeyboardFocus = false
+            expandedWindow?.lockTransparentRenderChrome()
             model.showMusic()
             refreshInteractiveHitRegions()
             relayoutExpandedPanelIfNeeded()
         case .showSystem:
             expandedWindow?.makeFirstResponder(nil)
+            expandedWindow?.allowsKeyboardFocus = false
+            expandedWindow?.lockTransparentRenderChrome()
             model.showSystem()
             refreshInteractiveHitRegions()
             relayoutExpandedPanelIfNeeded()
         case .showAgentMode:
+            if let expandedWindow {
+                expandedWindow.allowsKeyboardFocus = true
+                expandedWindow.lockTransparentRenderChrome()
+            }
             model.showAgent()
             refreshInteractiveHitRegions()
             relayoutExpandedPanelIfNeeded()
@@ -9023,9 +9241,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             return
         }
 
+        // Only Agent needs a key window for text input; Music/System stay non-activating.
+        if panel === expandedWindow, model.activeMode == .agent {
+            panel.allowsKeyboardFocus = true
+            panel.lockTransparentRenderChrome()
+        }
+
         NSRunningApplication.current.activate(options: [.activateAllWindows])
         NSApp.activate(ignoringOtherApps: true)
-        panel.makeKey()
+        if panel.allowsKeyboardFocus || panel.canBecomeKey {
+            panel.makeKey()
+            panel.makeKeyAndOrderFront(nil)
+        } else {
+            panel.orderFrontRegardless()
+        }
 
         if panel === expandedWindow {
             pendingExpandedActivationWorkItem?.cancel()
@@ -9039,9 +9268,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             if panel === self.expandedWindow, Date() < self.suppressExpandedPanelUntil {
                 return
             }
+            if panel === self.expandedWindow, self.model.activeMode == .agent {
+                panel.allowsKeyboardFocus = true
+                panel.lockTransparentRenderChrome()
+            }
             NSRunningApplication.current.activate(options: [.activateAllWindows])
             NSApp.activate(ignoringOtherApps: true)
-            panel.makeKeyAndOrderFront(nil)
+            if panel.allowsKeyboardFocus || panel.canBecomeKey {
+                panel.makeKeyAndOrderFront(nil)
+            } else {
+                panel.orderFrontRegardless()
+            }
         }
         if panel === expandedWindow {
             pendingExpandedActivationWorkItem = workItem
@@ -9059,6 +9296,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
         guard let expandedWindow else { return }
         expandedWindow.makeFirstResponder(nil)
+        expandedWindow.allowsKeyboardFocus = false
+        expandedWindow.lockTransparentRenderChrome()
         expandedWindow.orderOut(nil)
         expandedWindow.alphaValue = 1
     }
@@ -9257,188 +9496,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     private func buildMenu() {
-        let mainMenu = NSMenu()
-        let appMenuItem = NSMenuItem(title: "luma bar", action: nil, keyEquivalent: "")
-        let appMenu = NSMenu(title: "luma bar")
-        let aboutItem = NSMenuItem(
-            title: "About luma bar",
-            action: #selector(showAboutFromMenu),
-            keyEquivalent: ""
-        )
-        aboutItem.target = self
-        appMenu.addItem(aboutItem)
-        appMenu.addItem(.separator())
-        appMenu.addItem(
-            NSMenuItem(
-                title: "Quit luma bar",
-                action: #selector(quitFromMenu),
-                keyEquivalent: "q"
-            )
-        )
-        appMenuItem.submenu = appMenu
-        mainMenu.addItem(appMenuItem)
-
-        let themeMenuItem = NSMenuItem(title: "Theme", action: nil, keyEquivalent: "")
-        let themeMenu = NSMenu(title: "Theme")
-
-        let barItem = NSMenuItem(
-            title: IslandTheme.bar.displayName,
-            action: #selector(selectBarTheme),
-            keyEquivalent: "1"
-        )
-        barItem.target = self
-        barItem.keyEquivalentModifierMask = [.command, .option]
-        themeMenu.addItem(barItem)
-        barThemeMenuItem = barItem
-
-        let mistBlueItem = NSMenuItem(
-            title: IslandTheme.mistBlue.displayName,
-            action: #selector(selectMistBlueTheme),
-            keyEquivalent: "5"
-        )
-        mistBlueItem.target = self
-        mistBlueItem.keyEquivalentModifierMask = [.command, .option]
-        themeMenu.addItem(mistBlueItem)
-        mistBlueThemeMenuItem = mistBlueItem
-
-        let adventureXItem = NSMenuItem(
-            title: IslandTheme.adventureX.displayName,
-            action: #selector(selectAdventureXTheme),
-            keyEquivalent: "6"
-        )
-        adventureXItem.target = self
-        adventureXItem.keyEquivalentModifierMask = [.command, .option]
-        themeMenu.addItem(adventureXItem)
-        adventureXThemeMenuItem = adventureXItem
-
-        let eightBitItem = NSMenuItem(
-            title: IslandTheme.eightBit.displayName,
-            action: #selector(selectEightBitTheme),
-            keyEquivalent: "2"
-        )
-        eightBitItem.target = self
-        eightBitItem.keyEquivalentModifierMask = [.command, .option]
-        themeMenu.addItem(eightBitItem)
-        eightBitThemeMenuItem = eightBitItem
-
-        let pixelConsoleItem = NSMenuItem(
-            title: IslandTheme.pixelConsole.displayName,
-            action: #selector(selectPixelConsoleTheme),
-            keyEquivalent: "3"
-        )
-        pixelConsoleItem.target = self
-        pixelConsoleItem.keyEquivalentModifierMask = [.command, .option]
-        themeMenu.addItem(pixelConsoleItem)
-        pixelConsoleThemeMenuItem = pixelConsoleItem
-
-        let pixelCatItem = NSMenuItem(
-            title: IslandTheme.pixelCat.displayName,
-            action: #selector(selectPixelCatTheme),
-            keyEquivalent: "4"
-        )
-        pixelCatItem.target = self
-        pixelCatItem.keyEquivalentModifierMask = [.command, .option]
-        themeMenu.addItem(pixelCatItem)
-        pixelCatThemeMenuItem = pixelCatItem
-
-        let liquidGlassItem = NSMenuItem(
-            title: IslandTheme.liquidGlass.displayName,
-            action: #selector(selectLiquidGlassTheme),
-            keyEquivalent: "7"
-        )
-        liquidGlassItem.target = self
-        liquidGlassItem.keyEquivalentModifierMask = [.command, .option]
-        themeMenu.addItem(liquidGlassItem)
-        liquidGlassThemeMenuItem = liquidGlassItem
-
-        themeMenuItem.submenu = themeMenu
-        appMenu.insertItem(themeMenuItem, at: 0)
-        appMenu.insertItem(.separator(), at: 1)
-        let permissionItem = NSMenuItem(
-            title: "Permission Setup…",
-            action: #selector(showPermissionSetupFromMenu),
-            keyEquivalent: ""
-        )
-        permissionItem.target = self
-        appMenu.insertItem(permissionItem, at: 2)
-        appMenu.insertItem(.separator(), at: 3)
-        updateThemeMenuState(model.theme)
-
-        let agentMenuItem = NSMenuItem(title: "Agent", action: nil, keyEquivalent: "")
-        let agentMenu = NSMenu(title: "Agent")
-        if AppStoreDistribution.allowsShellAutomation {
-            let shellPromptItem = NSMenuItem(
-                title: AppStoreDistribution.isAppStoreBuild ? "Safe Action Prompt" : "Shell Prompt",
-                action: #selector(openShellPromptFromMenu),
-                keyEquivalent: "\r"
-            )
-            shellPromptItem.target = self
-            shellPromptItem.keyEquivalentModifierMask = [.command, .shift]
-            agentMenu.addItem(shellPromptItem)
-        }
-        #if LUMA_APP_STORE
-        let dataAccessMenu = NSMenu(title: "Data Access")
-        let grantCursor = NSMenuItem(
-            title: "Grant Cursor Folder…",
-            action: #selector(grantCursorFolderAccess),
-            keyEquivalent: ""
-        )
-        grantCursor.target = self
-        dataAccessMenu.addItem(grantCursor)
-        let grantCodex = NSMenuItem(
-            title: "Grant Codex Folder…",
-            action: #selector(grantCodexFolderAccess),
-            keyEquivalent: ""
-        )
-        grantCodex.target = self
-        dataAccessMenu.addItem(grantCodex)
-        let dataAccessItem = NSMenuItem(title: "Data Access", action: nil, keyEquivalent: "")
-        dataAccessItem.submenu = dataAccessMenu
-        agentMenu.addItem(dataAccessItem)
-        #endif
-        let voiceWhisperItem = NSMenuItem(
-            title: "Voice Whisper",
-            action: #selector(openVoiceWhisperFromMenu),
-            keyEquivalent: "m"
-        )
-        voiceWhisperItem.target = self
-        voiceWhisperItem.keyEquivalentModifierMask = [.command, .shift]
-        agentMenu.addItem(voiceWhisperItem)
-        if AppStoreDistribution.allowsSelectionTranslation {
-            agentMenu.addItem(.separator())
-            let translateSelectionItem = NSMenuItem(
-                title: "划词翻译（按住 ⌥）",
-                action: #selector(toggleSelectionTranslation),
-                keyEquivalent: ""
-            )
-            translateSelectionItem.target = self
-            translateSelectionItem.state = model.isSelectionTranslationEnabled ? .on : .off
-            agentMenu.addItem(translateSelectionItem)
-            selectionTranslationMenuItem = translateSelectionItem
-        }
-        if AppStoreDistribution.allowsAccessibilityFeatures {
-            let accessibilityItem = NSMenuItem(
-                title: "Allow Accessibility Access",
-                action: #selector(requestAccessibilityAccessFromMenu),
-                keyEquivalent: ""
-            )
-            accessibilityItem.target = self
-            agentMenu.addItem(accessibilityItem)
-        }
-        agentMenuItem.submenu = agentMenu
-        mainMenu.addItem(agentMenuItem)
-
-        let editMenuItem = NSMenuItem()
-        let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
-        editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
-        editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
-        editMenu.addItem(NSMenuItem.separator())
-        editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
-        editMenuItem.submenu = editMenu
-        mainMenu.addItem(editMenuItem)
-
-        NSApp.mainMenu = mainMenu
+        menuBuilder.target = self
+        NSApp.mainMenu = menuBuilder.makeApplicationMenu()
+        menuBuilder.updateThemeState(model.theme)
+        menuBuilder.updatePanelVisibility(isExpanded: model.isExpanded)
     }
 
     private func buildStatusItem() {
@@ -9447,171 +9508,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         if let button = item.button {
             let image = NSImage(
                 systemSymbolName: "capsule.fill",
-                accessibilityDescription: "luma bar"
+                accessibilityDescription: LumaBarL10n.appName
             )
             image?.isTemplate = true
             button.image = image
-            button.toolTip = "luma bar"
+            button.toolTip = LumaBarL10n.appName
         }
 
-        let menu = NSMenu(title: "luma bar")
-        let themeParent = NSMenuItem(title: "Theme", action: nil, keyEquivalent: "")
-        let themeMenu = NSMenu(title: "Theme")
-
-        let barItem = statusThemeItem(
-            title: IslandTheme.bar.displayName,
-            action: #selector(selectBarTheme)
-        )
-        themeMenu.addItem(barItem)
-        statusBarThemeMenuItem = barItem
-
-        let mistBlueItem = statusThemeItem(
-            title: IslandTheme.mistBlue.displayName,
-            action: #selector(selectMistBlueTheme)
-        )
-        themeMenu.addItem(mistBlueItem)
-        statusMistBlueThemeMenuItem = mistBlueItem
-
-        let adventureXItem = statusThemeItem(
-            title: IslandTheme.adventureX.displayName,
-            action: #selector(selectAdventureXTheme)
-        )
-        themeMenu.addItem(adventureXItem)
-        statusAdventureXThemeMenuItem = adventureXItem
-
-        let eightBitItem = statusThemeItem(
-            title: IslandTheme.eightBit.displayName,
-            action: #selector(selectEightBitTheme)
-        )
-        themeMenu.addItem(eightBitItem)
-        statusEightBitThemeMenuItem = eightBitItem
-
-        let pixelItem = statusThemeItem(
-            title: IslandTheme.pixelConsole.displayName,
-            action: #selector(selectPixelConsoleTheme)
-        )
-        themeMenu.addItem(pixelItem)
-        statusPixelConsoleThemeMenuItem = pixelItem
-
-        let pixelCatItem = statusThemeItem(
-            title: IslandTheme.pixelCat.displayName,
-            action: #selector(selectPixelCatTheme)
-        )
-        themeMenu.addItem(pixelCatItem)
-        statusPixelCatThemeMenuItem = pixelCatItem
-
-        let liquidGlassItem = statusThemeItem(
-            title: IslandTheme.liquidGlass.displayName,
-            action: #selector(selectLiquidGlassTheme)
-        )
-        themeMenu.addItem(liquidGlassItem)
-        statusLiquidGlassThemeMenuItem = liquidGlassItem
-
-        themeParent.submenu = themeMenu
-        menu.addItem(themeParent)
-
-        let permissionItem = NSMenuItem(
-            title: "Permission Setup…",
-            action: #selector(showPermissionSetupFromMenu),
-            keyEquivalent: ""
-        )
-        permissionItem.target = self
-        menu.addItem(permissionItem)
-        menu.addItem(.separator())
-
-        if AppStoreDistribution.allowsShellAutomation {
-            let shellPromptItem = NSMenuItem(
-                title: AppStoreDistribution.isAppStoreBuild ? "Safe Action Prompt (⌘⇧↩)" : "Shell Prompt (⌘⇧↩)",
-                action: #selector(openShellPromptFromMenu),
-                keyEquivalent: ""
-            )
-            shellPromptItem.target = self
-            menu.addItem(shellPromptItem)
-        }
-        let voiceWhisperItem = NSMenuItem(
-            title: "Voice Whisper (⌘⇧M)",
-            action: #selector(openVoiceWhisperFromMenu),
-            keyEquivalent: ""
-        )
-        voiceWhisperItem.target = self
-        menu.addItem(voiceWhisperItem)
-        if AppStoreDistribution.allowsExternalSessionMonitoring {
-            let testCursorCompletionItem = NSMenuItem(
-                title: "测试多任务完成提醒",
-                action: #selector(testCursorCompletionFromMenu),
-                keyEquivalent: ""
-            )
-            testCursorCompletionItem.target = self
-            menu.addItem(testCursorCompletionItem)
-            let testContextLimitItem = NSMenuItem(
-                title: "测试上下文极限提醒",
-                action: #selector(testContextLimitFromMenu),
-                keyEquivalent: ""
-            )
-            testContextLimitItem.target = self
-            menu.addItem(testContextLimitItem)
-        }
-        menu.addItem(.separator())
-
-        if AppStoreDistribution.allowsSelectionTranslation {
-            let selectionItem = NSMenuItem(
-                title: "划词翻译（按住 ⌥）",
-                action: #selector(toggleSelectionTranslation),
-                keyEquivalent: ""
-            )
-            selectionItem.target = self
-            selectionItem.state = model.isSelectionTranslationEnabled ? .on : .off
-            menu.addItem(selectionItem)
-            statusSelectionTranslationMenuItem = selectionItem
-        }
-
-
-        if AppStoreDistribution.allowsAccessibilityFeatures {
-            let accessibilityItem = NSMenuItem(
-                title: "Allow Accessibility Access",
-                action: #selector(requestAccessibilityAccessFromMenu),
-                keyEquivalent: ""
-            )
-            accessibilityItem.target = self
-            menu.addItem(accessibilityItem)
-        }
-
-        menu.addItem(.separator())
-        let quitItem = NSMenuItem(
-            title: "Quit luma bar",
-            action: #selector(quitFromMenu),
-            keyEquivalent: "q"
-        )
-        quitItem.target = self
-        menu.addItem(quitItem)
-
-        item.menu = menu
+        menuBuilder.target = self
+        item.menu = menuBuilder.makeStatusMenu()
         statusItem = item
-        updateThemeMenuState(model.theme)
+        menuBuilder.updateThemeState(model.theme)
+        menuBuilder.updatePanelVisibility(isExpanded: model.isExpanded)
     }
 
-    private func statusThemeItem(title: String, action: Selector) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-        item.target = self
-        return item
-    }
-
-    @objc private func quitFromMenu() {
+    @objc func quitFromMenu() {
         AppController.quitFromUserAction()
     }
 
-    @objc private func showAboutFromMenu() {
+    @objc func showAboutFromMenu() {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
         let copyright = Bundle.main.object(forInfoDictionaryKey: "NSHumanReadableCopyright") as? String
             ?? "Copyright © 2026 Luma Bar Core Team"
         let alert = NSAlert()
-        alert.messageText = "luma bar"
-        alert.informativeText = "Version \(version) (\(build))\n\n\(copyright)"
+        alert.messageText = LumaBarL10n.appName
+        alert.informativeText = LumaBarL10n.aboutVersion(
+            version: version,
+            build: build,
+            copyright: copyright
+        )
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+    }
+
+    @objc func showHelpFromMenu() {
+        HelpGuidePresenter.show()
+    }
+
+    @objc func toggleMainPanelFromMenu() {
+        handleMainPanelHotKey()
+    }
+
+    @objc func showPermissionSetupFromMenu() {
+        showPermissionOnboarding()
+    }
+
+    @objc func selectVoidTheme() {
+        model.theme = .void
+    }
+
+    @objc func selectHorizonTheme() {
+        model.theme = .horizon
+    }
+
+    @objc func selectForgeTheme() {
+        model.theme = .forge
+    }
+
+    @objc func selectGridTheme() {
+        model.theme = .grid
+    }
+
+    @objc func selectArcadeTheme() {
+        model.theme = .arcade
+    }
+
+    @objc func selectNookTheme() {
+        model.theme = .nook
+    }
+
+    @objc func selectAuraTheme() {
+        model.theme = .aura
     }
 
     @objc private func openShellPromptFromMenu() {
@@ -9628,34 +9598,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
     @objc private func testContextLimitFromMenu() {
         model.presentContextLimitTestReaction()
-    }
-
-    @objc private func selectBarTheme() {
-        model.theme = .bar
-    }
-
-    @objc private func selectMistBlueTheme() {
-        model.theme = .mistBlue
-    }
-
-    @objc private func selectAdventureXTheme() {
-        model.theme = .adventureX
-    }
-
-    @objc private func selectEightBitTheme() {
-        model.theme = .eightBit
-    }
-
-    @objc private func selectPixelConsoleTheme() {
-        model.theme = .pixelConsole
-    }
-
-    @objc private func selectPixelCatTheme() {
-        model.theme = .pixelCat
-    }
-
-    @objc private func selectLiquidGlassTheme() {
-        model.theme = .liquidGlass
     }
 
     @objc private func toggleSelectionTranslation() {
@@ -9685,8 +9627,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
     #endif
 
-    @objc private func showPermissionSetupFromMenu() {
-        showPermissionOnboarding()
+    private func updateThemeMenuState(_ theme: IslandTheme) {
+        menuBuilder.updateThemeState(theme)
     }
 
     private func showPermissionOnboarding() {
@@ -9703,15 +9645,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         onboardingModel.onPermissionBecameAuthorized = { [weak self] permission in
             self?.handlePermissionBecameAuthorized(permission)
         }
+        onboardingModel.onSoftReminder = { [weak self] message in
+            self?.model.requestDesktopPetMessage?(message)
+        }
         let contentView = PermissionOnboardingView(model: onboardingModel)
-        let onboardingHeight: CGFloat = 400
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: onboardingHeight),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 560),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.title = "权限设置"
+        window.title = "权限引导"
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.moveToActiveSpace]
@@ -9741,8 +9685,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                 installSelectionTranslationMonitor()
             }
             model.requestDesktopPetMessage?("辅助功能已生效，划词翻译可以用了。")
+        case .automation:
+            model.requestDesktopPetMessage?("自动化已授权，音乐同步可以工作了。")
         case .screenRecording:
-            model.requestDesktopPetMessage?("屏幕录制已授权。")
+            model.requestDesktopPetMessage?("屏幕录制已授权，截图分析可用。")
         }
     }
 
@@ -9774,22 +9720,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
         applyGrantedCapabilities(forceMusicScan: false, announce: false)
     }
 
-    private func updateThemeMenuState(_ theme: IslandTheme) {
-        barThemeMenuItem?.state = theme == .bar ? .on : .off
-        mistBlueThemeMenuItem?.state = theme == .mistBlue ? .on : .off
-        adventureXThemeMenuItem?.state = theme == .adventureX ? .on : .off
-        eightBitThemeMenuItem?.state = theme == .eightBit ? .on : .off
-        pixelConsoleThemeMenuItem?.state = theme == .pixelConsole ? .on : .off
-        pixelCatThemeMenuItem?.state = theme == .pixelCat ? .on : .off
-        liquidGlassThemeMenuItem?.state = theme == .liquidGlass ? .on : .off
-        statusBarThemeMenuItem?.state = theme == .bar ? .on : .off
-        statusMistBlueThemeMenuItem?.state = theme == .mistBlue ? .on : .off
-        statusAdventureXThemeMenuItem?.state = theme == .adventureX ? .on : .off
-        statusEightBitThemeMenuItem?.state = theme == .eightBit ? .on : .off
-        statusPixelConsoleThemeMenuItem?.state = theme == .pixelConsole ? .on : .off
-        statusPixelCatThemeMenuItem?.state = theme == .pixelCat ? .on : .off
-        statusLiquidGlassThemeMenuItem?.state = theme == .liquidGlass ? .on : .off
-    }
 }
 
 struct TimedLyricLine: Identifiable, Hashable {
@@ -10400,13 +10330,17 @@ final class NetEaseBridge: @unchecked Sendable {
 
     @discardableResult
     private func runNetEaseAppleScript(_ command: String) -> Bool {
+        // `launch` (not `activate`) keeps NetEase running without raising its windows.
         let timed = """
         using terms from application "NetEaseMusic"
           tell application id "\(Self.bundleIdentifier)"
             with timeout of 1 seconds
               try
-                \(command)
-                return "ok"
+                if it is running then
+                  launch
+                  \(command)
+                  return "ok"
+                end if
               end try
             end timeout
           end tell
@@ -10420,8 +10354,11 @@ final class NetEaseBridge: @unchecked Sendable {
         tell application id "\(Self.bundleIdentifier)"
           with timeout of 1 seconds
             try
-              \(command)
-              return "ok"
+              if it is running then
+                launch
+                \(command)
+                return "ok"
+              end if
             end try
           end timeout
         end tell
@@ -10432,10 +10369,28 @@ final class NetEaseBridge: @unchecked Sendable {
     @discardableResult
     private func openOrpheusCommand(_ message: [String: String]) -> Bool {
         guard let url = Self.commandURL(message: message) else { return false }
-        DispatchQueue.main.async {
-            NSWorkspace.shared.open(url)
-        }
+        openURLSilently(url)
         return true
+    }
+
+    /// Open a NetEase URL / orpheus deep link without activating the app.
+    private func openURLSilently(_ url: URL) {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        configuration.promptsUserIfNeeded = false
+        if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.bundleIdentifier) {
+            DispatchQueue.main.async {
+                NSWorkspace.shared.open(
+                    [url],
+                    withApplicationAt: appURL,
+                    configuration: configuration
+                ) { _, _ in }
+            }
+        } else {
+            DispatchQueue.main.async {
+                NSWorkspace.shared.open(url, configuration: configuration) { _, _ in }
+            }
+        }
     }
 
     private func sendModern(command: NetEaseRemoteCommand, options: NSDictionary?) -> Bool {
@@ -10455,8 +10410,10 @@ final class NetEaseBridge: @unchecked Sendable {
 
     @MainActor
     func openTrack(_ url: URL) {
+        // Background open only — never steal focus from Luma Bar / the frontmost app.
         let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
+        configuration.activates = false
+        configuration.promptsUserIfNeeded = false
 
         if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.bundleIdentifier) {
             NSWorkspace.shared.open(
@@ -10465,23 +10422,36 @@ final class NetEaseBridge: @unchecked Sendable {
                 configuration: configuration
             ) { _, _ in }
         } else {
-            NSWorkspace.shared.open(url)
+            NSWorkspace.shared.open(url, configuration: configuration) { _, _ in }
         }
     }
 
     @MainActor
     func openPlaylist(id: String) {
+        // Prefer a silent orpheus play-style command over openurl (openurl jumps the UI).
+        let playMessages: [[String: String]] = [
+            ["cmd": "play", "type": "playlist", "id": id],
+            ["type": "playlist", "id": id, "cmd": "play"]
+        ]
+        var opened = false
+        for message in playMessages {
+            if let commandURL = Self.commandURL(message: message) {
+                openURLSilently(commandURL)
+                opened = true
+            }
+        }
+        guard !opened else { return }
+
         guard let webURL = URL(string: "https://music.163.com/#/playlist?id=\(id)") else {
-            openApplication(activates: true)
+            openApplication(activates: false)
             return
         }
-
         openNetEaseWebURL(webURL)
     }
 
     @MainActor
     func openSong(id: String) {
-        // Prefer orpheus play commands; avoid opening song web pages (focus steal / panel collapse).
+        // Launch NetEase in background if needed, then issue orpheus play — never activate.
         openApplication(activates: false)
 
         let playMessages: [[String: String]] = [
@@ -10491,7 +10461,7 @@ final class NetEaseBridge: @unchecked Sendable {
         ]
         for message in playMessages {
             if let commandURL = Self.commandURL(message: message) {
-                NSWorkspace.shared.open(commandURL)
+                openURLSilently(commandURL)
             }
         }
 
@@ -10520,9 +10490,9 @@ final class NetEaseBridge: @unchecked Sendable {
         ]
 
         if let url = components.url {
-            NSWorkspace.shared.open(url)
+            openURLSilently(url)
         } else {
-            NSWorkspace.shared.open(webURL)
+            openURLSilently(webURL)
         }
     }
 
@@ -10763,6 +10733,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     /// Cancels stale ensureSinglePlayerPlaying play callbacks when the user clicks rapidly.
     private var exclusivePlayGeneration: UInt64 = 0
     @Published var musicLibrarySource: IslandMusicLibrarySource = .local
+    /// User manually picked a library channel — polling / frontmost-app heuristics must not steal it.
+    private var musicSourceUserLocked = false
     @Published var isScanning = false
     @Published var scanMessage = "Scanning local music"
     @Published var position: TimeInterval = 0
@@ -10936,21 +10908,42 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     var isProActive: Bool { true }
 
     var currentTrack: LocalTrack? {
-        if selectedNetEasePlaylistID != nil,
-           selectedNetEasePlaylistTracks.indices.contains(currentIndex)
-        {
-            return selectedNetEasePlaylistTracks[currentIndex]
-        }
-
-        guard tracks.indices.contains(currentIndex) else { return nil }
-        return tracks[currentIndex]
+        let list = activePlaybackList
+        guard list.indices.contains(currentIndex) else { return nil }
+        return list[currentIndex]
     }
 
+    /// Queue used by play / next / previous — always matches the visible library channel.
     private var currentPlaybackList: [LocalTrack] {
-        if selectedNetEasePlaylistID != nil, !selectedNetEasePlaylistTracks.isEmpty {
-            return selectedNetEasePlaylistTracks
+        activePlaybackList
+    }
+
+    /// Source-exclusive track queue. Local never falls through to a NetEase playlist.
+    private var activePlaybackList: [LocalTrack] {
+        switch musicLibrarySource {
+        case .local:
+            return Self.localPlayableTracks(from: tracks)
+        case .netEase:
+            if selectedNetEasePlaylistID != nil, !selectedNetEasePlaylistTracks.isEmpty {
+                return selectedNetEasePlaylistTracks
+            }
+            return tracks
+        case .appleMusic:
+            return []
         }
-        return tracks
+    }
+
+    /// Audio files Luma Bar can play with AVAudioPlayer (never `.ncm` / remote NetEase IDs).
+    nonisolated private static func localPlayableTracks(from tracks: [LocalTrack]) -> [LocalTrack] {
+        tracks.filter(isLocallyPlayableFile)
+    }
+
+    nonisolated private static func isLocallyPlayableFile(_ track: LocalTrack) -> Bool {
+        guard track.url.isFileURL else { return false }
+        let ext = track.url.pathExtension.lowercased()
+        if ext == "ncm" { return false }
+        let supported: Set<String> = ["mp3", "m4a", "aac", "wav", "aif", "aiff", "flac"]
+        return supported.contains(ext)
     }
 
     var isCodingContext: Bool {
@@ -11158,7 +11151,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var agentTokenAccentColor: Color {
-        if theme.isPixelCat {
+        if theme.isNook {
             if agentTokenProgress >= 0.95 {
                 return Color(red: 0.69, green: 0.286, blue: 0.302)
             }
@@ -11416,13 +11409,14 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     var isDisplayingAppleMusicNowPlaying: Bool {
-        // Visible library channel wins — channel switch is display-only.
+        // Visible library channel wins — never show a rival source over a user lock.
         switch musicLibrarySource {
         case .appleMusic:
             return appleMusicNowPlaying != nil
         case .netEase:
             return false
         case .local:
+            guard !musicSourceUserLocked else { return false }
             return isUsingAppleMusic
                 || (audioPlayer == nil && isAppleMusicContext && appleMusicNowPlaying != nil)
         }
@@ -11435,6 +11429,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         case .appleMusic:
             return false
         case .local:
+            guard !musicSourceUserLocked else { return false }
             return isUsingNetEase
                 || (audioPlayer == nil && isNetEaseContext && netEaseNowPlaying != nil)
         }
@@ -11445,13 +11440,30 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     private var shouldRouteControlsToAppleMusic: Bool {
-        isUsingAppleMusic
-            || musicLibrarySource == .appleMusic
-            || (audioPlayer == nil && isAppleMusicContext)
+        // Visible channel is absolute while the user has locked a source.
+        switch musicLibrarySource {
+        case .appleMusic:
+            return true
+        case .netEase:
+            return false
+        case .local:
+            return activeMusicSource == .appleMusic
+                || (isUsingAppleMusic && !musicSourceUserLocked)
+                || (!musicSourceUserLocked && audioPlayer == nil && isAppleMusicContext)
+        }
     }
 
     private var shouldRouteControlsToNetEase: Bool {
-        isUsingNetEase || (audioPlayer == nil && isNetEaseContext)
+        switch musicLibrarySource {
+        case .netEase:
+            return true
+        case .appleMusic:
+            return false
+        case .local:
+            // Local channel never routes to NetEase unless local itself owns playback
+            // as NetEase (should not happen after exclusivity claim).
+            return activeMusicSource == .netEase && isUsingNetEase && !musicSourceUserLocked
+        }
     }
 
     private var shouldRouteControlsToSystemPlayer: Bool {
@@ -11479,7 +11491,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             // Apple Music mirrors Music.app — no local track catalog yet.
             return []
         case .local:
-            return tracks.filter { $0.playbackSource == .direct }
+            return Self.localPlayableTracks(from: tracks)
         }
     }
 
@@ -11496,7 +11508,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             }
             return "在 Music.app 中播放歌曲后，将显示在这里"
         case .local:
-            return tracks.filter { $0.playbackSource == .direct }.isEmpty
+            return Self.localPlayableTracks(from: tracks).isEmpty
                 ? (scanMessage.isEmpty ? "没有本地歌曲" : scanMessage)
                 : ""
         }
@@ -11554,15 +11566,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         return !isDisplayingNetEaseNowPlaying && track == currentTrack
     }
 
-    /// Pure visual / control-surface switch.
-    /// Updates which app's cover/lyrics/list Luma Bar shows — **never** sends play/pause/resume.
-    /// Background playback of the previous app is left completely untouched.
+    /// User-facing source switch — claims exclusive control ownership for that channel.
+    /// Does not send play/pause to any player; only locks routing + display.
     func setMusicLibrarySource(_ source: IslandMusicLibrarySource) {
-        musicLibrarySource = source
-        // Pin long enough that auto-follow cannot yank the tab while the user is browsing.
-        musicLibrarySourceUserPinUntil = Date().addingTimeInterval(3.0)
-        // Do NOT mutate activeMusicSource / isUsing* — those track playback ownership from
-        // explicit Play/Pause / track taps only.
+        claimMusicSourceExclusivity(source, reason: "user-pill")
 
         switch source {
         case .netEase:
@@ -11573,12 +11580,57 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 self?.applyAppleMusicNowPlaying(AppleMusicService.shared.currentTrack)
             }
         case .local:
-            break
+            // Detach from any NetEase playlist browse state so next/prev stay on local files.
+            selectedNetEasePlaylistID = nil
+            selectedNetEasePlaylistTracks = []
+            let localCount = Self.localPlayableTracks(from: tracks).count
+            if localCount == 0 {
+                currentIndex = 0
+            } else if currentIndex >= localCount {
+                currentIndex = 0
+            }
         }
     }
 
-    /// Keep the library tab aligned with whoever is actually playing.
+    /// Lock `activeMusicSource` + library channel so dormant players cannot steal controls.
+    private func claimMusicSourceExclusivity(
+        _ source: IslandMusicLibrarySource,
+        reason: String
+    ) {
+        _ = reason
+        musicLibrarySource = source
+        activeMusicSource = source
+        musicSourceUserLocked = true
+        // Keep pin forever while locked — auto-follow must not yank the tab.
+        musicLibrarySourceUserPinUntil = .distantFuture
+
+        switch source {
+        case .local:
+            isUsingAppleMusic = false
+            isUsingNetEase = false
+        case .appleMusic:
+            isUsingAppleMusic = true
+            isUsingNetEase = false
+        case .netEase:
+            isUsingNetEase = true
+            isUsingAppleMusic = false
+        }
+    }
+
+    /// Whether background Now Playing / app-frontmost sync may mutate ownership for `source`.
+    private func allowsPassiveOwnership(for source: IslandMusicLibrarySource) -> Bool {
+        if musicSourceUserLocked {
+            return musicLibrarySource == source && activeMusicSource == source
+        }
+        return musicLibrarySource == source
+    }
+
+    /// Keep the library tab aligned with whoever is actually playing — never against a user lock.
     private func syncMusicLibrarySourceToActivePlayback(force: Bool = false) {
+        if musicSourceUserLocked, !force {
+            // User owns the channel; at most refresh activeMusicSource to match intentional play.
+            return
+        }
         guard force || Date() >= musicLibrarySourceUserPinUntil else { return }
 
         let target: IslandMusicLibrarySource?
@@ -11594,6 +11646,13 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
         guard let target else { return }
         activeMusicSource = target
+        if force {
+            claimMusicSourceExclusivity(target, reason: "playback-force")
+            if target == .netEase {
+                refreshNetEasePlaylists()
+            }
+            return
+        }
         guard musicLibrarySource != target else { return }
         musicLibrarySource = target
         if target == .netEase {
@@ -13881,7 +13940,15 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             return
         }
 
-        guard track.playbackSource == .direct else {
+        guard musicLibrarySource == .local || Self.isLocallyPlayableFile(track) else {
+            audioPlayer = nil
+            position = 0
+            duration = 0
+            isPlaying = false
+            return
+        }
+
+        guard Self.isLocallyPlayableFile(track) else {
             audioPlayer = nil
             position = 0
             duration = 0
@@ -13893,7 +13960,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     private func prepareDirectTrack(_ track: LocalTrack) {
-        guard track.playbackSource == .direct else {
+        guard Self.isLocallyPlayableFile(track) else {
             audioPlayer = nil
             position = 0
             duration = 0
@@ -13924,81 +13991,54 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         let applePlaying =
             (appleMusicNowPlaying?.isPlaying == true) || AppleMusicService.shared.isPlaying
         let localPlaying = audioPlayer?.isPlaying == true
-        // UI icon is the user-facing truth — after playlist switches MediaRemote often
-        // lags and netEaseNowPlaying?.isPlaying can be false while audio still plays.
-        let netEaseOwnsIsland =
-            isDisplayingNetEaseNowPlaying
-            || musicLibrarySource == .netEase
-            || activeMusicSource == .netEase
-            || isUsingNetEase
-        let netEasePlaying =
-            (netEaseNowPlaying?.isPlaying == true)
-            || (netEaseOwnsIsland && displayedIsPlaying && !applePlaying && !localPlaying)
 
-        // Library channel the user selected is the control surface — never let a
-        // background app that is still playing steal the Play button.
-        if musicLibrarySource == .appleMusic {
+        // Library channel the user selected is the absolute control surface —
+        // never let a dormant Now Playing snapshot steal the Play button.
+        switch musicLibrarySource {
+        case .appleMusic:
             executeTargetedPlayPause(target: .appleMusic, currentlyPlaying: applePlaying)
             return
-        }
-        if musicLibrarySource == .netEase {
+        case .netEase:
             executeTargetedPlayPause(
                 target: .netEase,
                 currentlyPlaying: displayedIsPlaying || (netEaseNowPlaying?.isPlaying == true)
             )
             return
+        case .local:
+            break
         }
 
-        // Both reporting play — hard-pause both by bundle ID (no global media key).
-        if applePlaying, netEasePlaying {
-            let preferred: IslandMusicLibrarySource =
-                (activeMusicSource == .netEase || musicLibrarySource == .netEase)
-                ? .netEase
-                : .appleMusic
-            activeMusicSource = preferred
-            isUsingAppleMusic = preferred == .appleMusic
-            isUsingNetEase = preferred == .netEase
-            pauseLocalPlaybackEngine()
-            markAppleMusicPausedInUI()
-            markNetEasePausedInUI()
-            DispatchQueue.global(qos: .userInitiated).async {
-                ExclusiveAudioFocus.pauseAppleMusic()
-                ExclusiveAudioFocus.pauseNetEase(likelyPlaying: true)
+        // Local channel: only local / explicitly owned backends — never "netEaseNowPlaying != nil".
+        if localPlaying || (activeMusicSource == .local && audioPlayer != nil) {
+            if localPlaying || isPlaying {
+                audioPlayer?.pause()
+                isPlaying = false
+            } else if let audioPlayer {
+                ensureSinglePlayerPlaying(target: .local) {
+                    self.isPlaying = audioPlayer.play()
+                }
             }
             return
         }
 
-        // Case 1: Apple Music is currently playing → pause NetEase, playpause Music.
-        if applePlaying {
-            executeTargetedPlayPause(target: .appleMusic, currentlyPlaying: true)
+        if activeMusicSource == .appleMusic || (isUsingAppleMusic && applePlaying) {
+            executeTargetedPlayPause(target: .appleMusic, currentlyPlaying: applePlaying)
             return
         }
 
-        // Case 2: NetEase owns the island / playback — force direct pause or play.
-        // Skip fragile MediaRemote "isPlaying" prechecks; follow the UI button.
-        if netEaseOwnsIsland || netEaseNowPlaying != nil {
-            executeTargetedPlayPause(
-                target: .netEase,
-                currentlyPlaying: displayedIsPlaying || (netEaseNowPlaying?.isPlaying == true)
-            )
-            return
-        }
-
-        if localPlaying {
-            audioPlayer?.pause()
-            isPlaying = false
-            return
-        }
-
-        // Case 3: Idle — last active / resolved player only; pause the other first.
+        // Idle local — prefer local engine / current track; do not fall through to NetEase
+        // merely because a stale NetEase snapshot exists in memory.
         let idleTarget = resolvedExclusivePlaybackTarget()
         switch idleTarget {
         case .appleMusic:
             executeTargetedPlayPause(target: .appleMusic, currentlyPlaying: false)
             return
         case .netEase:
-            executeTargetedPlayPause(target: .netEase, currentlyPlaying: displayedIsPlaying)
-            return
+            // Only if local channel somehow still points at NetEase ownership (unlocked legacy).
+            if !musicSourceUserLocked, isUsingNetEase {
+                executeTargetedPlayPause(target: .netEase, currentlyPlaying: displayedIsPlaying)
+                return
+            }
         case .local:
             break
         }
@@ -14035,9 +14075,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
 
         guard !tracks.isEmpty else {
-            if appleMusicNowPlaying != nil || musicLibrarySource == .appleMusic {
+            if musicLibrarySource == .appleMusic || appleMusicNowPlaying != nil {
                 executeTargetedPlayPause(target: .appleMusic, currentlyPlaying: false)
-            } else if netEaseNowPlaying != nil || musicLibrarySource == .netEase {
+            } else if musicLibrarySource == .netEase {
                 executeTargetedPlayPause(target: .netEase, currentlyPlaying: displayedIsPlaying)
             } else {
                 scanLocalMusic()
@@ -14045,7 +14085,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             return
         }
 
-        if let currentTrack, currentTrack.playbackSource.isNetEaseBacked {
+        // Local channel: never launch a NetEase-backed catalog row as a hijack path.
+        if !musicSourceUserLocked || musicLibrarySource == .netEase,
+           let currentTrack, currentTrack.playbackSource.isNetEaseBacked
+        {
             ensureSinglePlayerPlaying(target: .netEase) {
                 self.playNetEaseTrack(currentTrack)
             }
@@ -14077,6 +14120,11 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         let generation = exclusivePlayGeneration
 
         activeMusicSource = target
+        musicSourceUserLocked = true
+        musicLibrarySourceUserPinUntil = .distantFuture
+        if musicLibrarySource != target {
+            musicLibrarySource = target
+        }
         // Prefer live Now Playing; fall back to ownership flag when MR lags after a channel switch.
         let netEaseLikelyPlaying =
             (netEaseNowPlaying?.isPlaying == true) || (isUsingNetEase && target != .netEase)
@@ -14159,7 +14207,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     /// Which backend should own the next play/pause from the island controls.
     private func resolvedExclusivePlaybackTarget() -> IslandMusicLibrarySource {
-        // The visible library tab is the source of truth for the play button.
+        // User-selected library tab is absolute while exclusivity is locked.
+        if musicSourceUserLocked {
+            return musicLibrarySource
+        }
         switch musicLibrarySource {
         case .appleMusic:
             return .appleMusic
@@ -14169,20 +14220,11 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             if activeMusicSource == .appleMusic, appleMusicNowPlaying != nil {
                 return .appleMusic
             }
-            if activeMusicSource == .netEase, netEaseNowPlaying != nil {
-                return .netEase
+            if activeMusicSource == .local || audioPlayer != nil {
+                return .local
             }
             if isUsingAppleMusic, appleMusicNowPlaying != nil {
                 return .appleMusic
-            }
-            if isUsingNetEase, netEaseNowPlaying != nil {
-                return .netEase
-            }
-            if shouldRouteControlsToAppleMusic, appleMusicNowPlaying != nil {
-                return .appleMusic
-            }
-            if shouldRouteControlsToNetEase, netEaseNowPlaying != nil {
-                return .netEase
             }
             return .local
         }
@@ -14200,6 +14242,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             (netEaseNowPlaying?.isPlaying == true) || (isUsingNetEase && target != .netEase)
 
         activeMusicSource = target
+        musicSourceUserLocked = true
+        musicLibrarySourceUserPinUntil = .distantFuture
         switch target {
         case .appleMusic:
             isUsingAppleMusic = true
@@ -14216,6 +14260,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             isUsingNetEase = false
             markAppleMusicPausedInUI()
             markNetEasePausedInUI()
+        }
+        // Keep the visible channel aligned with intentional play without unlocking exclusivity.
+        if musicLibrarySource != target {
+            musicLibrarySource = target
         }
         syncMusicLibrarySourceToActivePlayback(force: false)
 
@@ -14258,11 +14306,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         // Used by next/previous/open — pause rivals immediately; play is caller's job.
         exclusivePlayGeneration &+= 1
         let netEaseLikelyPlaying = netEaseNowPlaying?.isPlaying == true
-        activeMusicSource = source
+        claimMusicSourceExclusivity(source, reason: "activate-exclusive")
         switch source {
         case .appleMusic:
-            isUsingAppleMusic = true
-            isUsingNetEase = false
             pauseLocalPlaybackEngine()
             markNetEasePausedInUI()
             DispatchQueue.global(qos: .userInitiated).async {
@@ -14272,8 +14318,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 )
             }
         case .netEase:
-            isUsingNetEase = true
-            isUsingAppleMusic = false
             pauseLocalPlaybackEngine()
             markAppleMusicPausedInUI()
             DispatchQueue.global(qos: .userInitiated).async {
@@ -14283,8 +14327,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 )
             }
         case .local:
-            isUsingAppleMusic = false
-            isUsingNetEase = false
             markAppleMusicPausedInUI()
             markNetEasePausedInUI()
             DispatchQueue.global(qos: .userInitiated).async {
@@ -14294,7 +14336,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 )
             }
         }
-        syncMusicLibrarySourceToActivePlayback(force: false)
     }
 
     private func silenceOtherPlaybackSources(except source: IslandMusicLibrarySource) {
@@ -14326,6 +14367,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         lastExclusiveAudioReconcileDate = now
 
         let preferred: IslandMusicLibrarySource = {
+            // User lock wins: silence rivals for the locked channel, never promote a dormant source.
+            if musicSourceUserLocked {
+                return musicLibrarySource
+            }
             switch musicLibrarySource {
             case .appleMusic where applePlaying:
                 return .appleMusic
@@ -14347,6 +14392,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 break
             }
             if applePlaying { return .appleMusic }
+            if localPlaying { return .local }
             if netEasePlaying { return .netEase }
             return .local
         }()
@@ -14453,6 +14499,24 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     func play(track: LocalTrack) {
         dismissTaskCompletionNoticeForInteraction()
+
+        // Local channel: always play the file with AVAudioPlayer, never open NetEase.
+        if musicLibrarySource == .local {
+            let list = activePlaybackList
+            if let index = list.firstIndex(of: track) {
+                currentIndex = index
+            } else if let index = list.firstIndex(where: {
+                $0.id == track.id || ($0.title == track.title && $0.artist == track.artist)
+            }) {
+                currentIndex = index
+            } else if Self.isLocallyPlayableFile(track) {
+                // Track visible but not yet indexed — play it directly and keep queue on local.
+                currentIndex = 0
+            }
+            playDirectTrack(track)
+            return
+        }
+
         if selectedNetEasePlaylistID != nil,
            let index = selectedNetEasePlaylistTracks.firstIndex(of: track)
         {
@@ -14468,7 +14532,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }) {
             currentIndex = index
         }
-        // Always play the tapped track — never silently no-op when list identity drifts.
 
         if track.playbackSource.isNetEaseBacked {
             playNetEaseTrack(track)
@@ -14480,6 +14543,16 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     func nextTrack() {
         dismissTaskCompletionNoticeForInteraction()
+
+        // Local queue is absolute while on the local channel.
+        if musicLibrarySource == .local {
+            let list = activePlaybackList
+            guard !list.isEmpty else { return }
+            currentIndex = (currentIndex + 1) % list.count
+            playCurrentSelection()
+            return
+        }
+
         if shouldRouteControlsToAppleMusic {
             ensureSinglePlayerPlaying(target: .appleMusic) {
                 AppleMusicService.shared.next()
@@ -14520,6 +14593,15 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     func previousTrack() {
         dismissTaskCompletionNoticeForInteraction()
+
+        if musicLibrarySource == .local {
+            let list = activePlaybackList
+            guard !list.isEmpty else { return }
+            currentIndex = (currentIndex - 1 + list.count) % list.count
+            playCurrentSelection()
+            return
+        }
+
         if shouldRouteControlsToAppleMusic {
             ensureSinglePlayerPlaying(target: .appleMusic) {
                 AppleMusicService.shared.previous()
@@ -14820,6 +14902,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
         switch context {
         case .netEase:
+            // Never let NetEase becoming frontmost steal a user-locked local / Apple Music channel.
+            guard allowsPassiveOwnership(for: .netEase) else { break }
             if activeMode != .music {
                 activeMode = .music
             }
@@ -14837,11 +14921,17 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             }
         case .general:
             if bundleIdentifier == "com.apple.Music" {
+                guard allowsPassiveOwnership(for: .appleMusic) || musicLibrarySource == .appleMusic else {
+                    break
+                }
                 if activeMode != .music {
                     activeMode = .music
                 }
                 if contextChanged || appNameChanged {
-                    isUsingAppleMusic = true
+                    if allowsPassiveOwnership(for: .appleMusic) {
+                        isUsingAppleMusic = true
+                        isUsingNetEase = false
+                    }
                     refreshAppleMusicNowPlaying(force: true)
                 }
             }
@@ -16452,8 +16542,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 }
 
                 self.preserveExpandedPanelForNetEaseActivation()
+                self.claimMusicSourceExclusivity(.netEase, reason: "agent-open-song")
                 NetEaseBridge.shared.openSong(id: song.id)
-                self.isUsingNetEase = true
                 self.isAgentStreaming = false
                 self.agentStatus = "Music"
                 self.agentResponse = "本地没有「\(cleanedQuery)」，已改为在网易云在线播放 \(song.title) · \(song.artist)。"
@@ -17423,7 +17513,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
     func openNetEaseCloudMusic() {
         preserveExpandedPanelForNetEaseActivation()
-        NetEaseBridge.shared.openApplication(activates: true)
+        // Keep NetEase in the background unless the user explicitly wants the client UI.
+        NetEaseBridge.shared.openApplication(activates: false)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.refreshNetEaseNowPlaying(force: true)
         }
@@ -17433,6 +17524,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         audioPlayer?.pause()
         audioPlayer = nil
         isPlaying = false
+        claimMusicSourceExclusivity(.netEase, reason: "play-netease-playlist")
         browseNetEasePlaylist(playlist)
         netEaseNowPlaying = NetEaseNowPlaying(
             title: playlist.name,
@@ -17443,7 +17535,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             duration: 0,
             isPlaying: false
         )
-        isUsingNetEase = true
         scanMessage = "Opening \(playlist.name)"
         preserveExpandedPanelForNetEaseActivation()
         loadNetEasePlaylistTracks(playlist)
@@ -17511,6 +17602,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     private func playCurrentSelection() {
         guard let currentTrack else { return }
 
+        // Local channel always advances through local files with AVAudioPlayer.
+        if musicLibrarySource == .local {
+            playDirectTrack(currentTrack)
+            return
+        }
+
         if currentTrack.playbackSource.isNetEaseBacked {
             playNetEaseTrack(currentTrack)
             return
@@ -17520,7 +17617,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     private func playDirectTrack(_ track: LocalTrack) {
-        guard track.playbackSource == .direct else { return }
+        guard Self.isLocallyPlayableFile(track) else { return }
+        claimMusicSourceExclusivity(.local, reason: "play-local-file")
         activateExclusivePlayback(source: .local)
         appleMusicNowPlaying = nil
         resolvedAppleMusicTrack = nil
@@ -17531,6 +17629,11 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         netEaseNowPlaying = nil
         resolvedNetEaseTrack = nil
         pendingNetEaseSeek = nil
+        // Playing local must not keep a NetEase playlist as the next/prev queue.
+        if musicLibrarySource == .local {
+            selectedNetEasePlaylistID = nil
+            selectedNetEasePlaylistTracks = []
+        }
         prepareDirectTrack(track)
         isPlaying = audioPlayer?.play() ?? false
         if !isPlaying {
@@ -17563,7 +17666,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             )
             self.isUsingNetEase = true
             self.syncMusicLibrarySourceToActivePlayback(force: true)
-            self.scanMessage = "Opening in NetEase Cloud Music"
+            self.scanMessage = "Playing in NetEase Cloud Music"
             self.preserveExpandedPanelForNetEaseActivation()
             switch track.playbackSource {
             case .netEaseSong(let songID):
@@ -17576,11 +17679,16 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                         album: track.album
                     )
                 )
+                // Silent deep-link play — never raise the NetEase window.
                 NetEaseBridge.shared.openSong(id: songID)
             case .netEase:
                 NetEaseBridge.shared.openTrack(track.url)
             case .direct, .appleMusic:
                 return
+            }
+            // Prefer background transport if deep-link left playback paused.
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.35) {
+                _ = ExclusiveAudioFocus.playNetEase()
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                 self?.refreshNetEaseNowPlaying(force: true)
@@ -17668,7 +17776,14 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         refreshExternalTaskStates(force: false)
         refreshSystemMetrics(force: false)
         if !isSeekingPlayback {
-            refreshNetEaseNowPlaying(force: false)
+            // Source exclusivity: only poll the active / visible channel — never keep
+            // dormant NetEase Now Playing warm enough to steal play/pause routing.
+            if allowsPassiveOwnership(for: .netEase)
+                || musicLibrarySource == .netEase
+                || activeMusicSource == .netEase
+            {
+                refreshNetEaseNowPlaying(force: false)
+            }
             refreshAppleMusicNowPlaying(force: false)
         }
         updateDesktopPetMood(now: tickDate)
@@ -17680,6 +17795,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
 
     private func refreshNetEaseNowPlaying(force: Bool) {
+        // Hard gate: locked away from NetEase → no MediaRemote / JXA sync that could re-own UI.
+        if musicSourceUserLocked, musicLibrarySource != .netEase, activeMusicSource != .netEase {
+            return
+        }
         let now = Date()
         guard force || now.timeIntervalSince(lastNetEaseRefreshDate) >= 0.65 else { return }
         lastNetEaseRefreshDate = now
@@ -17768,10 +17887,11 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
         // Metadata sync only — never play/pause rivals here.
         // Exclusive audio focus is owned solely by Play/Pause / track-tap paths.
-        if musicLibrarySource == .netEase, nowPlaying.isPlaying {
-            isUsingNetEase = true
-            activeMusicSource = .netEase
-        }
+        // Never promote NetEase ownership while the user locked another channel.
+        guard allowsPassiveOwnership(for: .netEase), nowPlaying.isPlaying else { return }
+        isUsingNetEase = true
+        isUsingAppleMusic = false
+        activeMusicSource = .netEase
     }
 
     private var lastAppleMusicRefreshDate = Date.distantPast
@@ -17884,10 +18004,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
 
         // Metadata sync only — never play/pause rivals here.
         // Exclusive audio focus is owned solely by Play/Pause / track-tap paths.
-        if musicLibrarySource == .appleMusic, nowPlaying.isPlaying {
-            isUsingAppleMusic = true
-            activeMusicSource = .appleMusic
-        }
+        guard allowsPassiveOwnership(for: .appleMusic), nowPlaying.isPlaying else { return }
+        isUsingAppleMusic = true
+        isUsingNetEase = false
+        activeMusicSource = .appleMusic
     }
 
     private func refreshResolvedAppleMusicDetails(for nowPlaying: MusicNowPlayingInfo) {
@@ -18493,13 +18613,14 @@ private enum LiquidGlassPaint {
     static func washOpacity(role: Role, isHovering: Bool, isSelected: Bool) -> Double {
         switch role {
         case .compact:
-            return isHovering ? 0.20 : 0.15
+            // Keep wash whisper-thin so wallpaper reads through Aura glass.
+            return isHovering ? 0.06 : 0.03
         case .panel, .overlay:
             return 0.0
         case .card:
-            return isSelected ? 0.08 : 0.03
+            return isSelected ? 0.06 : 0.02
         case .control:
-            return isSelected ? 0.24 : 0.16
+            return isSelected ? 0.12 : 0.06
         }
     }
 
@@ -18580,8 +18701,8 @@ private struct LiquidGlassInnerShadows<S: Shape>: View {
     }
 }
 
-/// Shared Liquid Glass surface: hardcoded translucent layer fill
-/// + wash + dual inner shadows + rim light. No NSVisualEffectView / SwiftUI materials.
+/// Shared Aura / Liquid Glass surface: behind-window system material
+/// + whisper wash + dual inner shadows + rim light.
 private struct LiquidGlassSurface<S: InsettableShape>: View {
     let shape: S
     var role: LiquidGlassPaint.Role = .panel
@@ -18616,15 +18737,14 @@ private struct LiquidGlassSurface<S: InsettableShape>: View {
         }
     }
 
-    /// Compact bar / small controls — denser glass (no SwiftUI material; those freeze after Spaces).
+    /// Compact bar / small controls — live HUD glass (forced active).
     private var compactBody: some View {
         ZStack {
-            // Do NOT SwiftUI-clip the effect view — that freezes blur into solid gray/black.
-            VisualEffectBackground(
-                material: .hudWindow,
-                blendingMode: .behindWindow,
-                isEmphasized: true,
-                cornerRadius: resolvedCornerRadius
+            // Clip via CALayer cornerRadius inside AuraGlassEffectView — SwiftUI
+            // `.clipShape` on NSVisualEffectView freezes blur into solid gray.
+            AuraGlassBackdrop(
+                cornerRadius: resolvedCornerRadius,
+                material: .hudWindow
             )
 
             ZStack {
@@ -18639,7 +18759,7 @@ private struct LiquidGlassSurface<S: InsettableShape>: View {
                 )
 
                 if isSelected, let selectedAccent {
-                    shape.fill(selectedAccent.opacity(0.14))
+                    shape.fill(selectedAccent.opacity(0.10))
                 }
 
                 LiquidGlassInnerShadows(shape: shape, role: role)
@@ -18647,8 +18767,8 @@ private struct LiquidGlassSurface<S: InsettableShape>: View {
                 shape.fill(
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(emphasized ? 0.20 : 0.12),
-                            Color.white.opacity(0.03),
+                            Color.white.opacity(emphasized ? 0.10 : 0.05),
+                            Color.white.opacity(0.015),
                             .clear
                         ],
                         startPoint: .top,
@@ -18661,18 +18781,17 @@ private struct LiquidGlassSurface<S: InsettableShape>: View {
                     lineWidth: LiquidGlassPaint.rimWidth(emphasized: emphasized, role: role)
                 )
             }
+            .clipShape(shape)
             .allowsHitTesting(false)
         }
     }
 
-    /// Expanded island — thin clear glass. No milk/blue veil; wallpaper stays visible.
+    /// Expanded island — thinnest clear glass; wallpaper stays readable.
     private var panelBody: some View {
         ZStack {
-            VisualEffectBackground(
-                material: .hudWindow,
-                blendingMode: .behindWindow,
-                isEmphasized: false,
-                cornerRadius: resolvedCornerRadius
+            AuraGlassBackdrop(
+                cornerRadius: resolvedCornerRadius,
+                material: .hudWindow
             )
 
             ZStack {
@@ -18685,13 +18804,14 @@ private struct LiquidGlassSurface<S: InsettableShape>: View {
 
                 shape
                     .inset(by: 1.25)
-                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.5)
+                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
             }
+            .clipShape(shape)
             .allowsHitTesting(false)
         }
     }
 
-    /// Interior wells on glass — frosted chips, never nested ultraThinMaterial.
+    /// Interior wells on glass — frosted chips only (no nested material).
     private var cardBody: some View {
         ZStack {
             shape.fill(
@@ -18705,15 +18825,15 @@ private struct LiquidGlassSurface<S: InsettableShape>: View {
             )
 
             if isSelected, let selectedAccent {
-                shape.fill(selectedAccent.opacity(0.08))
+                shape.fill(selectedAccent.opacity(0.06))
             }
 
             LiquidGlassInnerShadows(shape: shape, role: .card)
 
             shape.strokeBorder(
                 isSelected
-                    ? (selectedAccent ?? Color.white).opacity(0.45)
-                    : Color.white.opacity(0.18),
+                    ? (selectedAccent ?? Color.white).opacity(0.40)
+                    : Color.white.opacity(0.16),
                 lineWidth: 0.5
             )
         }
@@ -18730,7 +18850,7 @@ private struct CompactBarBackground: View {
 
         ZStack(alignment: .bottom) {
             switch theme {
-            case .eightBit:
+            case .grid:
                 shape.fill(Color(red: 0.025, green: 0.06, blue: 0.085).opacity(0.98))
                 PixelGridOverlay()
                     .clipShape(shape)
@@ -18738,7 +18858,7 @@ private struct CompactBarBackground: View {
                     theme.pixelBorder.opacity(isHovering ? 0.86 : 0.48),
                     lineWidth: isHovering ? 2 : 1
                 )
-            case .pixelConsole:
+            case .arcade:
                 shape.fill(
                     LinearGradient(
                         colors: [
@@ -18757,7 +18877,7 @@ private struct CompactBarBackground: View {
                     .fill(theme.primaryAccent.opacity(isHovering ? 0.9 : 0.58))
                     .frame(height: 1)
                     .clipShape(shape)
-            case .pixelCat:
+            case .nook:
                 VisualEffectBackground(
                     material: .popover,
                     blendingMode: .behindWindow,
@@ -18781,7 +18901,7 @@ private struct CompactBarBackground: View {
                     .fill(theme.primaryAccent.opacity(isHovering ? 0.72 : 0.42))
                     .frame(height: 1)
                     .clipShape(shape)
-            case .mistBlue:
+            case .horizon:
                 shape.fill(
                     LinearGradient(
                         colors: [
@@ -18796,7 +18916,7 @@ private struct CompactBarBackground: View {
                     theme.primaryAccent.opacity(isHovering ? 0.72 : 0.38),
                     lineWidth: isHovering ? 2 : 1
                 )
-            case .adventureX:
+            case .forge:
                 shape.fill(
                     LinearGradient(
                         colors: [
@@ -18822,9 +18942,9 @@ private struct CompactBarBackground: View {
                 .padding(.horizontal, 5)
                 .padding(.bottom, 3)
                 .clipShape(shape)
-            case .liquidGlass:
+            case .aura:
                 LiquidGlassSurface(shape: shape, role: .compact, isHovering: isHovering)
-            case .bar:
+            case .void:
                 VisualEffectBackground(
                     material: .hudWindow,
                     blendingMode: .behindWindow,
@@ -18863,7 +18983,7 @@ private struct ExpandedIslandBackground: View {
 
         ZStack(alignment: .top) {
             switch theme {
-            case .eightBit:
+            case .grid:
                 shape.fill(Color(red: 0.025, green: 0.06, blue: 0.085).opacity(0.99))
                 PixelGridOverlay()
                     .clipShape(shape)
@@ -18872,7 +18992,7 @@ private struct ExpandedIslandBackground: View {
                     .frame(height: 2)
                     .padding(.horizontal, 5)
                     .padding(.top, 4)
-            case .pixelConsole:
+            case .arcade:
                 shape.fill(
                     LinearGradient(
                         colors: [
@@ -18888,7 +19008,7 @@ private struct ExpandedIslandBackground: View {
                     .frame(height: 3)
                     .padding(.horizontal, 9)
                     .padding(.top, 5)
-            case .pixelCat:
+            case .nook:
                 VisualEffectBackground(
                     material: .popover,
                     blendingMode: .behindWindow,
@@ -18915,7 +19035,7 @@ private struct ExpandedIslandBackground: View {
                     )
                     .frame(width: 68, height: 2)
                     .padding(.top, 6)
-            case .mistBlue:
+            case .horizon:
                 shape.fill(
                     LinearGradient(
                         colors: [
@@ -18938,7 +19058,7 @@ private struct ExpandedIslandBackground: View {
                     .frame(height: 2)
                     .padding(.horizontal, 10)
                     .padding(.top, 5)
-            case .adventureX:
+            case .forge:
                 shape.fill(Color(red: 0.961, green: 0.933, blue: 0.863))
                 AdventureXGridOverlay()
                     .clipShape(shape)
@@ -18953,9 +19073,9 @@ private struct ExpandedIslandBackground: View {
                 .frame(height: 4)
                 .padding(.horizontal, 18)
                 .padding(.top, 6)
-            case .liquidGlass:
+            case .aura:
                 LiquidGlassSurface(shape: shape, role: .panel)
-            case .bar:
+            case .void:
                 VisualEffectBackground(
                     material: .hudWindow,
                     blendingMode: .behindWindow,
@@ -18991,13 +19111,13 @@ private struct ThemedCardBackground: View {
 
         ZStack {
             switch theme {
-            case .bar:
+            case .void:
                 shape.fill(Color.white.opacity(isSelected ? 0.08 : 0.04))
                 shape.strokeBorder(
                     isSelected ? selectedAccent.opacity(0.36) : Color.white.opacity(0.055),
                     lineWidth: 1
                 )
-            case .mistBlue:
+            case .horizon:
                 shape.fill(
                     isSelected
                         ? selectedAccent.opacity(0.16)
@@ -19007,7 +19127,7 @@ private struct ThemedCardBackground: View {
                     isSelected ? selectedAccent.opacity(0.68) : theme.pixelBorder.opacity(0.22),
                     lineWidth: isSelected ? 1.5 : 1
                 )
-            case .adventureX:
+            case .forge:
                 shape.fill(
                     isSelected
                         ? Color(red: 0.906, green: 0.863, blue: 0.753)
@@ -19023,13 +19143,13 @@ private struct ThemedCardBackground: View {
                 RoundedRectangle(cornerRadius: max(1, radius - 2), style: .continuous)
                     .strokeBorder(Color.white.opacity(0.46), lineWidth: 1)
                     .padding(3)
-            case .eightBit:
+            case .grid:
                 shape.fill(isSelected ? selectedAccent.opacity(0.15) : Color.black.opacity(0.18))
                 shape.strokeBorder(
                     isSelected ? selectedAccent.opacity(0.92) : theme.pixelBorder.opacity(0.25),
                     lineWidth: isSelected ? 2 : 1
                 )
-            case .pixelConsole:
+            case .arcade:
                 shape.fill(
                     LinearGradient(
                         colors: [
@@ -19047,13 +19167,13 @@ private struct ThemedCardBackground: View {
                     isSelected ? selectedAccent.opacity(0.9) : theme.pixelBorder.opacity(0.38),
                     lineWidth: isSelected ? 2 : 1
                 )
-            case .pixelCat:
+            case .nook:
                 shape.fill(isSelected ? selectedAccent.opacity(0.14) : Color.white.opacity(0.46))
                 shape.strokeBorder(
                     isSelected ? selectedAccent.opacity(0.48) : Color.white.opacity(0.58),
                     lineWidth: 1
                 )
-            case .liquidGlass:
+            case .aura:
                 LiquidGlassSurface(
                     shape: shape,
                     role: .card,
@@ -19446,9 +19566,9 @@ private struct PixelDesktopPetView: View {
 
         ZStack {
             Group {
-                if model.theme == .mistBlue {
+                if model.theme == .horizon {
                     PixelPandaCompanion(mode: model.activeMode)
-                } else if model.theme.isPixelCat {
+                } else if model.theme.isNook {
                     PixelCatCompanion(mode: model.activeMode)
                 } else {
                     PixelDogCompanion(mode: model.activeMode)
@@ -19590,9 +19710,9 @@ private struct PixelCompanionSpeechBubble: View {
 
     private var surface: Color {
         switch theme {
-        case .mistBlue:
+        case .horizon:
             return Color(red: 0.965, green: 0.985, blue: 1.0)
-        case .pixelCat:
+        case .nook:
             return Color(red: 1.0, green: 0.965, blue: 0.93)
         default:
             return Color(red: 0.047, green: 0.11, blue: 0.16)
@@ -19601,7 +19721,7 @@ private struct PixelCompanionSpeechBubble: View {
 
     private var border: Color {
         switch theme {
-        case .mistBlue, .pixelCat:
+        case .horizon, .nook:
             return theme.primaryAccent
         default:
             return Color(red: 1.0, green: 0.70, blue: 0.31)
@@ -19946,7 +20066,7 @@ struct SystemGlyphBadge: View {
             RoundedRectangle(cornerRadius: theme.controlCornerRadius, style: .continuous)
                 .fill(
                     LinearGradient(
-                        colors: theme.isAdventureX
+                        colors: theme.isForge
                             ? [Color(red: 0.965, green: 0.941, blue: 0.855), Color(red: 0.906, green: 0.863, blue: 0.753)]
                             : (theme.isLight
                             ? [Color.white.opacity(0.98), Color(red: 0.88, green: 0.95, blue: 1.0)]
@@ -19981,10 +20101,10 @@ struct AgentGlyphBadge: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            theme.isAdventureX
+                            theme.isForge
                                 ? Color(red: 0.965, green: 0.941, blue: 0.855)
                                 : (theme.isLight ? Color.white.opacity(0.96) : Color(red: 0.12, green: 0.16, blue: 0.24)),
-                            theme.isAdventureX
+                            theme.isForge
                                 ? Color(red: 0.906, green: 0.863, blue: 0.753)
                                 : (theme.isLight ? Color(red: 0.9, green: 0.96, blue: 1.0) : Color(red: 0.05, green: 0.07, blue: 0.1))
                         ],
@@ -20166,7 +20286,7 @@ private struct SystemUsageBar: View {
 
     var body: some View {
         Group {
-            if theme.isPixelStyled && !theme.isPixelCat {
+            if theme.isPixelStyled && !theme.isNook {
                 let segmentCount = 14
                 let filledSegments = Int(ceil(min(1, max(0, progress)) * Double(segmentCount)))
 
@@ -20430,7 +20550,7 @@ private struct NetEasePlaylistChip: View {
                 ThemedCardBackground(
                     isSelected: isSelected,
                     accent: theme.primaryAccent,
-                    cornerRadius: theme.isEightBit ? 2 : 9
+                    cornerRadius: theme.isGrid ? 2 : 9
                 )
             }
             .overlay(alignment: .bottom) {
@@ -20457,7 +20577,7 @@ private struct NetEasePlaylistCover: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: theme.isEightBit ? 1 : 6, style: .continuous)
+            RoundedRectangle(cornerRadius: theme.isGrid ? 1 : 6, style: .continuous)
                 .fill(theme.controlFill)
 
             if let image {
@@ -20472,11 +20592,11 @@ private struct NetEasePlaylistCover: View {
         }
         .overlay {
             if theme.isPixelStyled || theme.isLight {
-                RoundedRectangle(cornerRadius: theme.isEightBit ? 1 : 6, style: .continuous)
+                RoundedRectangle(cornerRadius: theme.isGrid ? 1 : 6, style: .continuous)
                     .stroke(theme.pixelBorder.opacity(0.36), lineWidth: 1)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: theme.isEightBit ? 1 : 6, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: theme.isGrid ? 1 : 6, style: .continuous))
     }
 }
 
@@ -20493,7 +20613,7 @@ private final class NativeMusicSeekBarView: NSView {
         }
     }
 
-    var theme = IslandTheme.bar {
+    var theme = IslandTheme.void {
         didSet {
             needsDisplay = true
         }
@@ -20583,15 +20703,15 @@ private final class NativeMusicSeekBarView: NSView {
                 height: trackHeight
             )
             let color: NSColor
-            if theme.isPixelConsole {
+            if theme.isArcade {
                 color = index < filledSegments
                     ? NSColor(calibratedRed: 1.0, green: 0.70, blue: 0.31, alpha: 1.0)
                     : NSColor(calibratedRed: 0.15, green: 0.18, blue: 0.30, alpha: 1.0)
-            } else if theme.isPixelCat {
+            } else if theme.isNook {
                 color = index < filledSegments
                     ? NSColor(calibratedRed: 1.0, green: 0.714, blue: 0.38, alpha: 1.0)
                     : NSColor(calibratedRed: 0.25, green: 0.18, blue: 0.17, alpha: 1.0)
-            } else if theme.isAdventureX {
+            } else if theme.isForge {
                 color = index < filledSegments
                     ? NSColor(calibratedRed: 0.843, green: 0.353, blue: 0.153, alpha: 1.0)
                     : NSColor(calibratedRed: 0.741, green: 0.706, blue: 0.616, alpha: 1.0)
@@ -20611,11 +20731,11 @@ private final class NativeMusicSeekBarView: NSView {
             max(0, bounds.width * CGFloat(min(1, max(0, progress))) - markerWidth / 2)
         )
         let markerColor: NSColor
-        if theme.isPixelConsole {
+        if theme.isArcade {
             markerColor = NSColor(calibratedWhite: 0.95, alpha: 1.0)
-        } else if theme.isPixelCat {
+        } else if theme.isNook {
             markerColor = NSColor(calibratedRed: 1.0, green: 0.553, blue: 0.427, alpha: 1.0)
-        } else if theme.isAdventureX {
+        } else if theme.isForge {
             markerColor = NSColor(calibratedRed: 0.176, green: 0.439, blue: 0.286, alpha: 1.0)
         } else {
             markerColor = NSColor(calibratedRed: 0.49, green: 1.0, blue: 0.42, alpha: 1.0)
@@ -20735,12 +20855,37 @@ private enum AgentFocusedField {
 }
 
 private final class AgentSecureTextFieldView: NSSecureTextField {
+    override var acceptsFirstResponder: Bool { true }
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
     }
 
     override func mouseDown(with event: NSEvent) {
         NSApp.activate(ignoringOtherApps: true)
+        if let panel = window as? IslandPanel {
+            panel.allowsKeyboardFocus = true
+            panel.lockTransparentRenderChrome()
+        }
+        window?.makeKey()
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
+    }
+}
+
+private final class AgentMessageTextFieldView: NSTextField {
+    override var acceptsFirstResponder: Bool { true }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        NSApp.activate(ignoringOtherApps: true)
+        if let panel = window as? IslandPanel {
+            panel.allowsKeyboardFocus = true
+            panel.lockTransparentRenderChrome()
+        }
         window?.makeKey()
         window?.makeFirstResponder(self)
         super.mouseDown(with: event)
@@ -20764,6 +20909,9 @@ private struct AgentAPIKeyField: NSViewRepresentable {
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
+        field.isEditable = true
+        field.isSelectable = true
+        field.isEnabled = true
         field.textColor = textColor
         field.placeholderString = parentPlaceholder
         field.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
@@ -20778,6 +20926,8 @@ private struct AgentAPIKeyField: NSViewRepresentable {
         context.coordinator.parent = self
         field.placeholderString = parentPlaceholder
         field.textColor = textColor
+        field.isEditable = true
+        field.isEnabled = true
         if field.stringValue != text {
             field.stringValue = text
         }
@@ -20794,7 +20944,7 @@ private struct AgentAPIKeyField: NSViewRepresentable {
     }
 
     private var textColor: NSColor {
-        if theme.isAdventureX {
+        if theme.isForge {
             return NSColor(calibratedRed: 0.153, green: 0.212, blue: 0.173, alpha: 0.94)
         }
         if theme.isLight {
@@ -20820,6 +20970,10 @@ private struct AgentAPIKeyField: NSViewRepresentable {
 
             DispatchQueue.main.async {
                 NSApp.activate(ignoringOtherApps: true)
+                if let panel = field.window as? IslandPanel {
+                    panel.allowsKeyboardFocus = true
+                    panel.lockTransparentRenderChrome()
+                }
                 field.window?.makeKeyAndOrderFront(nil)
                 field.window?.makeFirstResponder(field)
             }
@@ -20827,6 +20981,89 @@ private struct AgentAPIKeyField: NSViewRepresentable {
 
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSSecureTextField else { return }
+            parent.text = field.stringValue
+        }
+
+        func control(
+            _ control: NSControl,
+            textView: NSTextView,
+            doCommandBy commandSelector: Selector
+        ) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                parent.onSubmit()
+                return true
+            }
+            return false
+        }
+    }
+}
+
+/// AppKit-backed Agent chat field — SwiftUI TextField cannot become first responder when
+/// the hosting NSPanel historically returned `canBecomeKey == false`.
+private struct AgentMessageTextField: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+    let onSubmit: () -> Void
+    @Environment(\.islandTheme) private var theme
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeNSView(context: Context) -> AgentMessageTextFieldView {
+        let field = AgentMessageTextFieldView()
+        field.delegate = context.coordinator
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.isEditable = true
+        field.isSelectable = true
+        field.isEnabled = true
+        field.textColor = textColor
+        field.placeholderString = placeholder
+        field.font = theme.isPixelStyled
+            ? .monospacedSystemFont(ofSize: 12, weight: .medium)
+            : .systemFont(ofSize: 12, weight: .medium)
+        field.lineBreakMode = .byTruncatingTail
+        field.usesSingleLineMode = true
+        field.cell?.isScrollable = true
+        field.cell?.wraps = false
+        return field
+    }
+
+    func updateNSView(_ field: AgentMessageTextFieldView, context: Context) {
+        context.coordinator.parent = self
+        field.placeholderString = placeholder
+        field.textColor = textColor
+        field.isEditable = true
+        field.isEnabled = true
+        if field.stringValue != text {
+            field.stringValue = text
+        }
+    }
+
+    private var textColor: NSColor {
+        if theme.isForge {
+            return NSColor(calibratedRed: 0.153, green: 0.212, blue: 0.173, alpha: 0.94)
+        }
+        if theme.isLight {
+            return NSColor(calibratedRed: 0.094, green: 0.204, blue: 0.322, alpha: 0.92)
+        }
+        if theme.isPixelStyled {
+            return NSColor(calibratedRed: 0.82, green: 1.0, blue: 0.92, alpha: 0.94)
+        }
+        return .white.withAlphaComponent(0.9)
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: AgentMessageTextField
+
+        init(parent: AgentMessageTextField) {
+            self.parent = parent
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
             parent.text = field.stringValue
         }
 
@@ -20936,7 +21173,7 @@ private struct AgentMarkdownOutputView: View {
                 Text(verbatim: text)
                     .font(.system(size: 10.5, weight: .medium, design: .monospaced))
                     .foregroundStyle(
-                        theme.isAdventureX
+                        theme.isForge
                             ? theme.foreground(opacity: 0.92)
                             : (theme.isLight
                                 ? theme.foreground(opacity: 0.88)
@@ -20947,7 +21184,7 @@ private struct AgentMarkdownOutputView: View {
                     .padding(.horizontal, 8)
             }
             .background(
-                theme.isAdventureX
+                theme.isForge
                     ? Color(red: 0.784, green: 0.745, blue: 0.647).opacity(0.42)
                     : (theme.isLight
                         ? theme.primaryAccent.opacity(0.1)
@@ -21094,7 +21331,7 @@ private struct TokenUsageGauge: View {
             let side = min(proxy.size.width, proxy.size.height)
 
             switch theme {
-            case .bar:
+            case .void:
                 let lineWidth = max(3, side * 0.1)
                 ZStack {
                     Circle()
@@ -21111,7 +21348,7 @@ private struct TokenUsageGauge: View {
                         .foregroundStyle(.white.opacity(0.92))
                 }
 
-            case .mistBlue:
+            case .horizon:
                 let lineWidth = max(3, side * 0.1)
                 ZStack {
                     Circle()
@@ -21134,7 +21371,7 @@ private struct TokenUsageGauge: View {
                         .foregroundStyle(theme.foregroundColor.opacity(0.92))
                 }
 
-            case .adventureX:
+            case .forge:
                 let radius = max(3, side * 0.1)
                 let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
                 let lineWidth = max(3, side * 0.085)
@@ -21163,7 +21400,7 @@ private struct TokenUsageGauge: View {
                         .background(Color(red: 0.961, green: 0.933, blue: 0.863).opacity(0.82))
                 }
 
-            case .eightBit:
+            case .grid:
                 let cellCount = 16
                 let filledCells = Int(ceil(clampedProgress * Double(cellCount)))
                 ZStack {
@@ -21199,7 +21436,7 @@ private struct TokenUsageGauge: View {
                         .stroke(theme.pixelBorder.opacity(0.8), lineWidth: 2)
                 }
 
-            case .pixelConsole:
+            case .arcade:
                 let radius = max(5, side * 0.18)
                 ZStack {
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -21232,7 +21469,7 @@ private struct TokenUsageGauge: View {
                     }
                 }
 
-            case .pixelCat:
+            case .nook:
                 let lineWidth = max(4, side * 0.105)
                 ZStack {
                     Circle()
@@ -21275,7 +21512,7 @@ private struct TokenUsageGauge: View {
                 }
                 .shadow(color: theme.primaryAccent.opacity(0.12), radius: 6, y: 2)
 
-            case .liquidGlass:
+            case .aura:
                 let lineWidth = max(3.5, side * 0.1)
                 ZStack {
                     LiquidGlassSurface(shape: Circle(), role: .control)
@@ -21296,7 +21533,7 @@ private struct TokenUsageGauge: View {
                 }
             }
         }
-        .animation(theme.isEightBit ? nil : .easeInOut(duration: 0.22), value: clampedProgress)
+        .animation(theme.isGrid ? nil : .easeInOut(duration: 0.22), value: clampedProgress)
     }
 }
 
@@ -21316,7 +21553,7 @@ private struct TokenProgressTrack: View {
     var body: some View {
         Group {
             switch theme {
-            case .bar:
+            case .void:
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
                         Capsule(style: .continuous)
@@ -21343,7 +21580,7 @@ private struct TokenProgressTrack: View {
                     }
                 }
 
-            case .mistBlue:
+            case .horizon:
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
                         Capsule(style: .continuous)
@@ -21360,7 +21597,7 @@ private struct TokenProgressTrack: View {
                     }
                 }
 
-            case .adventureX:
+            case .forge:
                 let segmentCount = 20
                 let filledSegments = Int(ceil(clampedProgress * Double(segmentCount)))
                 HStack(spacing: 2) {
@@ -21378,7 +21615,7 @@ private struct TokenProgressTrack: View {
                     }
                 }
 
-            case .eightBit:
+            case .grid:
                 let segmentCount = 24
                 let filledSegments = Int(ceil(clampedProgress * Double(segmentCount)))
                 HStack(spacing: 2) {
@@ -21396,7 +21633,7 @@ private struct TokenProgressTrack: View {
                     }
                 }
 
-            case .pixelConsole:
+            case .arcade:
                 GeometryReader { proxy in
                     let filledWidth = proxy.size.width * clampedProgress
                     ZStack(alignment: .leading) {
@@ -21436,7 +21673,7 @@ private struct TokenProgressTrack: View {
                     }
                 }
 
-            case .pixelCat:
+            case .nook:
                 GeometryReader { proxy in
                     let filledWidth = proxy.size.width * clampedProgress
                     ZStack(alignment: .leading) {
@@ -21463,7 +21700,7 @@ private struct TokenProgressTrack: View {
                     .shadow(color: theme.primaryAccent.opacity(0.1), radius: 3, y: 1)
                 }
 
-            case .liquidGlass:
+            case .aura:
                 GeometryReader { proxy in
                     let track = Capsule(style: .continuous)
                     ZStack(alignment: .leading) {
@@ -21482,8 +21719,8 @@ private struct TokenProgressTrack: View {
                 }
             }
         }
-        .frame(height: theme == .bar || theme == .mistBlue || theme == .liquidGlass ? 4 : 7)
-        .animation(theme.isEightBit ? nil : .easeInOut(duration: 0.22), value: clampedProgress)
+        .frame(height: theme == .void || theme == .horizon || theme == .aura ? 4 : 7)
+        .animation(theme.isGrid ? nil : .easeInOut(duration: 0.22), value: clampedProgress)
     }
 
     private func tick(opacity: Double) -> some View {
@@ -21497,12 +21734,12 @@ private struct TokenUsageCardBackground: View {
     @Environment(\.islandTheme) private var theme
 
     var body: some View {
-        let radius: CGFloat = theme == .bar || theme == .mistBlue || theme == .liquidGlass ? 41 : (theme.isEightBit ? 2 : 12)
+        let radius: CGFloat = theme == .void || theme == .horizon || theme == .aura ? 41 : (theme.isGrid ? 2 : 12)
         let shape = ThemeRectShape(radius: radius, chamfer: 0)
 
         ZStack(alignment: .top) {
             switch theme {
-            case .bar:
+            case .void:
                 shape.fill(
                     LinearGradient(
                         colors: [
@@ -21515,7 +21752,7 @@ private struct TokenUsageCardBackground: View {
                 )
                 shape.strokeBorder(.white.opacity(0.22), lineWidth: 1)
 
-            case .mistBlue:
+            case .horizon:
                 shape.fill(
                     LinearGradient(
                         colors: [
@@ -21528,7 +21765,7 @@ private struct TokenUsageCardBackground: View {
                 )
                 shape.strokeBorder(theme.primaryAccent.opacity(0.34), lineWidth: 1)
 
-            case .adventureX:
+            case .forge:
                 shape.fill(
                     LinearGradient(
                         colors: [
@@ -21541,7 +21778,7 @@ private struct TokenUsageCardBackground: View {
                 )
                 shape.strokeBorder(theme.pixelBorder.opacity(0.58), lineWidth: 1.5)
 
-            case .eightBit:
+            case .grid:
                 shape.fill(Color(red: 0.018, green: 0.045, blue: 0.062).opacity(0.98))
                 PixelGridOverlay()
                     .clipShape(shape)
@@ -21551,7 +21788,7 @@ private struct TokenUsageCardBackground: View {
                     .padding(.horizontal, 4)
                     .padding(.top, 4)
 
-            case .pixelConsole:
+            case .arcade:
                 shape.fill(
                     LinearGradient(
                         colors: [
@@ -21568,7 +21805,7 @@ private struct TokenUsageCardBackground: View {
                     .padding(.horizontal, 8)
                     .padding(.top, 5)
 
-            case .pixelCat:
+            case .nook:
                 VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
                     .clipShape(shape)
                 shape.fill(
@@ -21593,7 +21830,7 @@ private struct TokenUsageCardBackground: View {
                     .frame(width: 58, height: 2)
                     .padding(.top, 6)
 
-            case .liquidGlass:
+            case .aura:
                 LiquidGlassSurface(shape: shape, role: .overlay)
             }
         }
@@ -21609,7 +21846,7 @@ private struct CodexTokenOverlayBackground: View {
 
         ZStack(alignment: .top) {
             switch theme {
-            case .bar:
+            case .void:
                 VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow)
                     .clipShape(shape)
                 shape.fill(
@@ -21624,7 +21861,7 @@ private struct CodexTokenOverlayBackground: View {
                 )
                 shape.strokeBorder(.white.opacity(0.11), lineWidth: 1)
 
-            case .mistBlue:
+            case .horizon:
                 VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
                     .clipShape(shape)
                 shape.fill(
@@ -21639,7 +21876,7 @@ private struct CodexTokenOverlayBackground: View {
                 )
                 shape.strokeBorder(theme.primaryAccent.opacity(0.36), lineWidth: 1)
 
-            case .adventureX:
+            case .forge:
                 shape.fill(Color(red: 0.961, green: 0.933, blue: 0.863))
                 AdventureXGridOverlay()
                     .clipShape(shape)
@@ -21655,7 +21892,7 @@ private struct CodexTokenOverlayBackground: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 6)
 
-            case .eightBit:
+            case .grid:
                 shape.fill(Color(red: 0.018, green: 0.045, blue: 0.062).opacity(0.99))
                 PixelGridOverlay()
                     .clipShape(shape)
@@ -21665,7 +21902,7 @@ private struct CodexTokenOverlayBackground: View {
                     .padding(.horizontal, 5)
                     .padding(.top, 4)
 
-            case .pixelConsole:
+            case .arcade:
                 shape.fill(
                     LinearGradient(
                         colors: [
@@ -21682,7 +21919,7 @@ private struct CodexTokenOverlayBackground: View {
                     .padding(.horizontal, 10)
                     .padding(.top, 5)
 
-            case .pixelCat:
+            case .nook:
                 VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
                     .clipShape(shape)
                 shape.fill(
@@ -21707,7 +21944,7 @@ private struct CodexTokenOverlayBackground: View {
                     .frame(width: 68, height: 2)
                     .padding(.top, 6)
 
-            case .liquidGlass:
+            case .aura:
                 LiquidGlassSurface(shape: shape, role: .overlay)
             }
         }
@@ -21720,7 +21957,7 @@ private struct AgentTokenUsageBar: View {
     @Environment(\.islandTheme) private var theme
 
     var body: some View {
-        HStack(spacing: theme.isEightBit ? 11 : 14) {
+        HStack(spacing: theme.isGrid ? 11 : 14) {
             TokenUsageGauge(
                 progress: model.agentTokenProgress,
                 label: "AI",
@@ -21748,7 +21985,7 @@ private struct AgentTokenUsageBar: View {
                 .monospacedDigit()
                 .lineLimit(1)
         }
-        .padding(.horizontal, theme.isEightBit ? 12 : 16)
+        .padding(.horizontal, theme.isGrid ? 12 : 16)
         .frame(width: 344, height: 82)
         .background { TokenUsageCardBackground() }
         .shadow(
@@ -21773,8 +22010,8 @@ private struct CodexTokenOverlayView: View {
     @State private var hasAppeared = false
 
     var body: some View {
-        VStack(spacing: theme.isEightBit ? 10 : 12) {
-            HStack(spacing: theme.isEightBit ? 11 : 14) {
+        VStack(spacing: theme.isGrid ? 10 : 12) {
+            HStack(spacing: theme.isGrid ? 11 : 14) {
                 TokenUsageGauge(
                     progress: model.agentTokenProgress,
                     label: "AI",
@@ -21785,7 +22022,7 @@ private struct CodexTokenOverlayView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
 	                        Group {
-	                            if theme.isEightBit {
+	                            if theme.isGrid {
 	                                Rectangle()
 	                                    .fill(model.agentTokenAccentColor.opacity(model.agentTokenProgress >= 0.7 ? 0.95 : 0.44))
 	                            } else {
@@ -21821,7 +22058,7 @@ private struct CodexTokenOverlayView: View {
 
 	                VStack(alignment: .trailing, spacing: 1) {
 	                    Text(model.agentTokenPercentText)
-	                        .font(theme.font(size: theme.isEightBit ? 22 : 25, weight: .bold))
+	                        .font(theme.font(size: theme.isGrid ? 22 : 25, weight: .bold))
 	                        .foregroundStyle(model.agentTokenAccentColor)
 	                        .monospacedDigit()
 	                        .lineLimit(1)
@@ -21911,21 +22148,21 @@ private struct CodexTokenOverlayView: View {
                 }
             }
         }
-        .padding(.horizontal, theme.isEightBit ? 14 : 18)
-        .padding(.vertical, theme.isEightBit ? 12 : 14)
+        .padding(.horizontal, theme.isGrid ? 14 : 18)
+        .padding(.vertical, theme.isGrid ? 12 : 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { CodexTokenOverlayBackground() }
         .scaleEffect(
-            x: theme.isEightBit ? 1 : 0.985,
-            y: hasAppeared || theme.isEightBit ? 1 : 0.88,
+            x: theme.isGrid ? 1 : 0.985,
+            y: hasAppeared || theme.isGrid ? 1 : 0.88,
             anchor: .top
         )
-        .offset(y: hasAppeared || theme.isEightBit ? 0 : -6)
+        .offset(y: hasAppeared || theme.isGrid ? 0 : -6)
         .opacity(hasAppeared ? 1 : 0)
         .onAppear {
             if reduceMotion {
                 hasAppeared = true
-            } else if theme.isEightBit {
+            } else if theme.isGrid {
                 withAnimation(.linear(duration: 0.1)) {
                     hasAppeared = true
                 }
@@ -21935,8 +22172,8 @@ private struct CodexTokenOverlayView: View {
                 }
             }
         }
-        .animation(theme.isEightBit ? nil : .easeInOut(duration: 0.22), value: model.agentTokenProgress)
-        .animation(theme.isEightBit ? nil : .easeInOut(duration: 0.22), value: model.kiroCreditsUsage?.progress)
+        .animation(theme.isGrid ? nil : .easeInOut(duration: 0.22), value: model.agentTokenProgress)
+        .animation(theme.isGrid ? nil : .easeInOut(duration: 0.22), value: model.kiroCreditsUsage?.progress)
         .help(
             model.kiroCreditsUsage.map {
                 "\(model.agentRemainingTokens) tokens remain · \($0.remainingText.lowercased()) credits"
@@ -22119,7 +22356,7 @@ struct TokenDashboardView: View {
     private var divider: some View {
         Rectangle()
             .fill(theme.isPixelStyled ? theme.pixelBorder.opacity(0.32) : theme.separatorColor)
-            .frame(width: theme.isEightBit ? 2 : 1, height: 34)
+            .frame(width: theme.isGrid ? 2 : 1, height: 34)
     }
 
     private func tokenMetric(title: String, value: String, tint: Color) -> some View {
@@ -22194,7 +22431,7 @@ struct AgentDashboardView: View {
     }
 
     var body: some View {
-        VStack(spacing: theme.isAdventureX ? 6 : 8) {
+        VStack(spacing: theme.isForge ? 6 : 8) {
             if model.agentShowsAPIKeySetup {
             HStack(spacing: 8) {
                 Image(systemName: model.agentHasAPIKey ? "key.fill" : "key")
@@ -22266,9 +22503,9 @@ struct AgentDashboardView: View {
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
-            .padding(.top, theme.isAdventureX ? 18 : 0)
+            .padding(.top, theme.isForge ? 18 : 0)
             .background {
-                if theme.isAdventureX {
+                if theme.isForge {
                     AdventureXAgentSectionBackground(
                         label: "ACCESS KEY",
                         detail: model.agentHasAPIKey ? "SECURE / READY" : "INPUT REQUIRED",
@@ -22294,9 +22531,9 @@ struct AgentDashboardView: View {
                 }
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
-                .padding(.top, theme.isAdventureX ? 18 : 0)
+                .padding(.top, theme.isForge ? 18 : 0)
                 .background {
-                    if theme.isAdventureX {
+                    if theme.isForge {
                         AdventureXAgentSectionBackground(
                             label: "PROVIDER",
                             detail: "BUILT-IN / READY",
@@ -22309,7 +22546,7 @@ struct AgentDashboardView: View {
             }
 
             HStack(spacing: 6) {
-                if theme.isAdventureX {
+                if theme.isForge {
                     Text("CTX")
                         .font(.system(size: 8, weight: .black, design: .monospaced))
                         .tracking(0.5)
@@ -22321,7 +22558,7 @@ struct AgentDashboardView: View {
                 Image(systemName: model.agentContextIcon)
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(
-                        theme.isAdventureX
+                        theme.isForge
                             ? theme.activityAccent.opacity(0.96)
                             : Color.islandCyan.opacity(0.9)
                     )
@@ -22335,10 +22572,10 @@ struct AgentDashboardView: View {
                     .foregroundStyle(theme.mutedForeground(opacity: 0.84))
                     .lineLimit(1)
             }
-            .padding(.horizontal, theme.isAdventureX ? 6 : 0)
-            .frame(height: theme.isAdventureX ? 22 : 16)
+            .padding(.horizontal, theme.isForge ? 6 : 0)
+            .frame(height: theme.isForge ? 22 : 16)
             .background {
-                if theme.isAdventureX {
+                if theme.isForge {
                     ThemedCardBackground(cornerRadius: theme.fieldCornerRadius)
                 }
             }
@@ -22349,16 +22586,16 @@ struct AgentDashboardView: View {
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         .padding(.horizontal, 10)
                         .padding(.bottom, 9)
-                        .padding(.top, theme.isAdventureX ? 24 : 10)
+                        .padding(.top, theme.isForge ? 24 : 10)
                 }
             }
             .frame(
                 maxWidth: .infinity,
-                minHeight: theme.isAdventureX ? 64 : 56,
-                maxHeight: theme.isAdventureX ? 78 : 72
+                minHeight: theme.isForge ? 64 : 56,
+                maxHeight: theme.isForge ? 78 : 72
             )
             .background {
-                if theme.isAdventureX {
+                if theme.isForge {
                     AdventureXAgentSectionBackground(
                         label: "AGENT FIELD LOG",
                         detail: model.isAgentStreaming ? "LIVE FEED" : "STANDBY",
@@ -22371,7 +22608,7 @@ struct AgentDashboardView: View {
 
             if !model.agentQuickActions.isEmpty {
                 HStack(spacing: 7) {
-                    if theme.isAdventureX {
+                    if theme.isForge {
                         Text("TOOLS")
                             .font(.system(size: 8, weight: .black, design: .monospaced))
                             .tracking(0.5)
@@ -22454,7 +22691,7 @@ struct AgentDashboardView: View {
                 }
                 .padding(.horizontal, 9)
                 .frame(height: 28)
-                .background(ThemedCardBackground(cornerRadius: theme.isEightBit ? 2 : 7))
+                .background(ThemedCardBackground(cornerRadius: theme.isGrid ? 2 : 7))
             }
 
             if let command = model.pendingAgentShellCommand {
@@ -22502,7 +22739,7 @@ struct AgentDashboardView: View {
                 }
                 .padding(.horizontal, 9)
                 .frame(height: 28)
-                .background(ThemedCardBackground(cornerRadius: theme.isEightBit ? 2 : 7))
+                .background(ThemedCardBackground(cornerRadius: theme.isGrid ? 2 : 7))
             }
 
             HStack(spacing: 8) {
@@ -22533,16 +22770,15 @@ struct AgentDashboardView: View {
                         : (model.isVoiceWhisperRecording ? "Finish Voice Whisper" : "Start Voice Whisper")
                 )
 
-                TextField(model.agentInputPlaceholder, text: $model.agentInput)
-                    .textFieldStyle(.plain)
-                    .font(theme.font(size: 12, weight: .medium))
-                    .foregroundStyle(theme.foreground(opacity: 0.9))
-                    .focused($focusedField, equals: .message)
-                    .onSubmit {
-                        model.submitAgentPrompt()
-                    }
+                AgentMessageTextField(
+                    text: $model.agentInput,
+                    placeholder: model.agentInputPlaceholder
+                ) {
+                    model.submitAgentPrompt()
+                }
+                    .frame(minHeight: 34)
                     .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 4)
                     .background(ThemedCardBackground(cornerRadius: theme.fieldCornerRadius))
 
                 Button {
@@ -22600,7 +22836,7 @@ struct AgentDashboardView: View {
         let shape = ThemeRectShape(radius: theme.controlCornerRadius, chamfer: 0)
         ZStack {
             shape.fill(fill)
-            if theme.isAdventureX {
+            if theme.isForge {
                 AdventureXGridOverlay()
                     .opacity(0.42)
                     .clipShape(shape)
@@ -22636,7 +22872,7 @@ private struct ExpandedIslandSurface: View {
         .clipped()
         .environment(\.islandTheme, model.theme)
         // Liquid Glass: don't force dark scheme — it milks the behind-window blur gray/white.
-        .preferredColorScheme(model.theme == .liquidGlass ? nil : model.theme.preferredColorScheme)
+        .preferredColorScheme(model.theme == .aura ? nil : model.theme.preferredColorScheme)
     }
 }
 
@@ -22855,24 +23091,24 @@ struct MusicExpandedView: View {
             )
         )
         .shadow(
-            color: theme == .liquidGlass
+            color: theme == .aura
                 ? Color.black.opacity(0.05)
-                : (theme.isAdventureX
+                : (theme.isForge
                 ? Color(red: 0.31, green: 0.33, blue: 0.28).opacity(0.72)
                 : (theme.isLight
                 ? theme.primaryAccent.opacity(0.22)
-                : (theme.isPixelConsole
+                : (theme.isArcade
                 ? .clear
-                : (theme.isPixelCat
+                : (theme.isNook
                     ? .black.opacity(0.38)
                     : (theme.isPixelStyled ? .black.opacity(0.72) : .black.opacity(0.26)))))),
-            radius: theme == .liquidGlass
+            radius: theme == .aura
                 ? 16
-                : (theme.isPixelCat ? 14 : (theme.isPixelStyled ? 0 : 12)),
-            x: theme.isEightBit ? 4 : 0,
-            y: theme == .liquidGlass
+                : (theme.isNook ? 14 : (theme.isPixelStyled ? 0 : 12)),
+            x: theme.isGrid ? 4 : 0,
+            y: theme == .aura
                 ? 6
-                : (theme.isAdventureX ? 7 : (theme.isEightBit ? 4 : (theme.isPixelCat ? 8 : 7)))
+                : (theme.isForge ? 7 : (theme.isGrid ? 4 : (theme.isNook ? 8 : 7)))
         )
         .animation(.spring(response: 0.24, dampingFraction: 0.9), value: model.activeMode)
         .animation(.easeInOut(duration: 0.16), value: model.displayedIsPlaying)
@@ -22916,7 +23152,7 @@ struct MusicExpandedView: View {
                 .font(theme.font(size: 10, weight: .semibold))
                 .foregroundStyle(
                     active
-                        ? (theme.isLight || theme == .liquidGlass ? theme.accentForeground : Color.black.opacity(0.82))
+                        ? (theme.isLight || theme == .aura ? theme.accentForeground : Color.black.opacity(0.82))
                         : theme.mutedForeground(opacity: 0.92)
                 )
                 .padding(.horizontal, 9)
@@ -22925,8 +23161,8 @@ struct MusicExpandedView: View {
                     RoundedRectangle(cornerRadius: theme.controlCornerRadius, style: .continuous)
                         .fill(
                             active
-                                ? (theme.isPixelStyled || theme.isLight || theme == .liquidGlass
-                                    ? theme.primaryAccent.opacity(theme == .liquidGlass ? 0.92 : 1)
+                                ? (theme.isPixelStyled || theme.isLight || theme == .aura
+                                    ? theme.primaryAccent.opacity(theme == .aura ? 0.92 : 1)
                                     : Color.white.opacity(0.92))
                                 : theme.controlFill
                         )
@@ -22970,7 +23206,7 @@ struct MusicExpandedView: View {
             Image(systemName: icon)
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(
-                    theme == .liquidGlass
+                    theme == .aura
                         ? (active ? Color.black.opacity(0.78) : theme.foreground(opacity: 0.78))
                         : (active ? theme.accentForeground : theme.foreground(opacity: 0.74))
                 )
@@ -22980,7 +23216,7 @@ struct MusicExpandedView: View {
                 )
                 .background {
                     let pill = RoundedRectangle(cornerRadius: theme.controlCornerRadius, style: .continuous)
-                    if theme == .liquidGlass {
+                    if theme == .aura {
                         pill
                             .fill(active ? Color.white.opacity(0.88) : Color.white.opacity(0.10))
                             .overlay {
@@ -23185,7 +23421,7 @@ struct LyricsPane: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
         .background {
-            ThemedCardBackground(cornerRadius: theme.isEightBit ? 2 : 12)
+            ThemedCardBackground(cornerRadius: theme.isGrid ? 2 : 12)
         }
     }
 
@@ -23303,7 +23539,7 @@ struct AlbumBadge: View {
     var body: some View {
         GeometryReader { proxy in
             let side = min(proxy.size.width, proxy.size.height)
-            let radius = theme.isEightBit ? CGFloat(1) : max(6, side * 0.18)
+            let radius = theme.isGrid ? CGFloat(1) : max(6, side * 0.18)
 
             ZStack {
                 if let artworkImage {
@@ -23327,7 +23563,7 @@ struct AlbumBadge: View {
                             )
 
                         ForEach(0..<4, id: \.self) { index in
-                            RoundedRectangle(cornerRadius: theme.isEightBit ? 0 : 999)
+                            RoundedRectangle(cornerRadius: theme.isGrid ? 0 : 999)
                                 .fill(.white.opacity(index == 0 ? 0.82 : 0.3))
                                 .frame(
                                     width: side * CGFloat(0.64 + Double(index) * 0.18),
@@ -23398,14 +23634,14 @@ struct ProgressRing: View {
                 ZStack {
                     Circle()
                         .stroke(
-                            theme.isPixelCat ? theme.pixelBorder.opacity(0.24) : .white.opacity(0.12),
+                            theme.isNook ? theme.pixelBorder.opacity(0.24) : .white.opacity(0.12),
                             lineWidth: 3
                         )
 
                     Circle()
                         .trim(from: 0, to: min(1, max(0, progress)))
                         .stroke(
-                            theme.isPixelCat
+                            theme.isNook
                                 ? (active ? theme.activityAccent : theme.primaryAccent)
                                 : (active ? Color.islandGreen : Color.islandTangerine),
                             style: StrokeStyle(lineWidth: 3, lineCap: .round)
@@ -23415,7 +23651,7 @@ struct ProgressRing: View {
                     Image(systemName: active ? "waveform" : "music.note")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(
-                            theme.isPixelCat
+                            theme.isNook
                                 ? theme.foreground(opacity: 0.84)
                                 : Color.white.opacity(0.78)
                         )

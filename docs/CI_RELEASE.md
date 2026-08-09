@@ -1,0 +1,100 @@
+# GitHub Actions — Developer ID 签名 + 公证发版
+
+本仓库是 **SwiftPM**（`Package.swift`），**没有** `.xcodeproj` / `.xcworkspace`，因此 CI **不走** `xcodebuild archive`，而是：
+
+`swift build` → `build_app.sh` 组 `.app` → Developer ID `codesign` → `notarytool` → `stapler`
+
+这与官网直发 / Gatekeeper 路径一致。`Support/exportOptions.plist` 留给以后若迁到 Xcode 工程时用。
+
+---
+
+## 1. 文件放在哪
+
+| 文件 | 作用 |
+|------|------|
+| `Support/exportOptions.plist` | 将来 Xcode `exportArchive` 用（method=`developer-id`） |
+| `scripts/ci_release.sh` | 本地 / CI 共用的签名公证脚本 |
+| `.github/workflows/release.yml` | Tag `v*` 触发的流水线 |
+
+---
+
+## 2. 你需要配置的 GitHub Secrets
+
+在仓库 **Settings → Secrets and variables → Actions** 添加：
+
+| Secret | 说明 | 如何生成 |
+|--------|------|----------|
+| `BUILD_CERTIFICATE_BASE64` | Developer ID Application 的 `.p12`（Base64） | `base64 -i Certificates.p12 \| pbcopy` |
+| `P12_PASSWORD` | 导出该 p12 时设的密码 | — |
+| `KEYCHAIN_PASSWORD` | CI 临时 keychain 密码（任意长随机串） | `openssl rand -base64 24` |
+| `APPLE_API_KEY_ID` | App Store Connect API Key ID | Users and Access → Keys |
+| `APPLE_API_ISSUER` | Issuer ID（UUID） | 同上页顶部 |
+| `APPLE_API_KEY_BASE64` | `AuthKey_XXX.p8` 文件 Base64 | `base64 -i AuthKey_XXX.p8 \| pbcopy` |
+| `LUMA_BAR_DEEPSEEK_API_KEY` | （可选）构建时注入 Agent Key | 不设则不注入 |
+
+> 推荐用 **App Store Connect API Key** 做公证，比 Apple ID + app-specific password 更稳。
+
+---
+
+## 3. YAML 里要不要改「工程名 / Scheme」？
+
+| 常见 xcodebuild 参数 | 本仓库现状 |
+|---------------------|------------|
+| Workspace / Project | **无** — 不用填 |
+| Scheme | **无** — 不用填 |
+| Bundle ID | 已在 `Support/Info.plist`：`com.lumabar.app` |
+| App 显示名 | `luma bar.app`（workflow 里 `APP_DISPLAY_NAME`） |
+| Entitlements | `Support/LumaBar.entitlements` |
+| 签名身份 | Secret 证书导入后自动找 `Developer ID Application:`；也可在 workflow `env.CODESIGN_IDENTITY` 写死完整字符串 |
+
+若你以后生成了 Xcode 工程，再改用：
+
+```bash
+xcodebuild archive -scheme LumaBar -archivePath build/LumaBar.xcarchive
+xcodebuild -exportArchive \
+  -archivePath build/LumaBar.xcarchive \
+  -exportPath dist \
+  -exportOptionsPlist Support/exportOptions.plist
+```
+
+并把 `Support/exportOptions.plist` 里的 `YOUR_TEAM_ID` 换成你的 10 位 Team ID。
+
+---
+
+## 4. 触发方式
+
+```bash
+git tag -a v0.4.0 -m "Release v0.4.0"
+git push origin v0.4.0
+```
+
+流水线会：
+
+1. 用 tag 写入 `CFBundleShortVersionString`，用 `github.run_number` 写 `CFBundleVersion`
+2. 导入证书到临时 keychain
+3. 跑 `scripts/ci_release.sh`（universal 构建 + 签名 + 公证 + staple）
+4. 产出 `.zip` / `.dmg` / `.app`，并创建 GitHub Release
+
+---
+
+## 5. 本地试跑（有证书时）
+
+```bash
+export LUMA_BAR_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+export APPLE_API_KEY_PATH="$HOME/AuthKey_XXX.p8"
+export APPLE_API_KEY_ID="XXXXXXXXXX"
+export APPLE_API_ISSUER="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+export LUMA_BAR_MAKE_DMG=1
+./scripts/ci_release.sh
+```
+
+---
+
+## 6. 常见失败
+
+| 现象 | 处理 |
+|------|------|
+| `no identity found` | p12 不是 **Developer ID Application**，或 `KEYCHAIN_PASSWORD` / partition-list 失败 |
+| `notarytool` 401 | API Key 权限、Issuer、Key ID、p8 内容不对 |
+| Gatekeeper 仍拦 | 确认 staple 成功；用户下载的是 **stapled 后的 zip/dmg** |
+| SPM 资源缺失 | `build_app.sh` 已拷 `LumaBar_LumaBar.bundle`；看 CI 日志是否有 `Bundled localization` |

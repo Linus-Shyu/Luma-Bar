@@ -71,6 +71,36 @@ else
 fi
 
 cp "$ROOT/Support/Info.plist" "$APP/Contents/Info.plist"
+if [[ -d "$ROOT/Support/zh-Hans.lproj" ]]; then
+  mkdir -p "$APP/Contents/Resources/zh-Hans.lproj"
+  cp -R "$ROOT/Support/zh-Hans.lproj/." "$APP/Contents/Resources/zh-Hans.lproj/"
+fi
+
+# SPM String Catalog resource bundle (LumaBar_LumaBar.bundle)
+copy_spm_resource_bundle() {
+  local bin_dir="$1"
+  local bundle
+  for bundle in "$bin_dir"/LumaBar_LumaBar.bundle "$bin_dir"/LumaBar.bundle; do
+    if [[ -d "$bundle" ]]; then
+      rm -rf "$APP/Contents/Resources/$(basename "$bundle")"
+      cp -R "$bundle" "$APP/Contents/Resources/"
+      # Also keep a copy next to the executable for Bundle.module lookup.
+      rm -rf "$APP/Contents/MacOS/$(basename "$bundle")"
+      cp -R "$bundle" "$APP/Contents/MacOS/"
+      echo "Bundled localization: $(basename "$bundle")"
+      return 0
+    fi
+  done
+  echo "warning: SPM resource bundle not found under $bin_dir" >&2
+  return 1
+}
+
+if [[ "$BUILD_UNIVERSAL" == "1" ]]; then
+  copy_spm_resource_bundle "$(swift build -c release --triple "$ARM64_TRIPLE" --show-bin-path)" || true
+else
+  copy_spm_resource_bundle "$(swift build -c release --show-bin-path)" || true
+fi
+
 if [[ -d "$ROOT/Support/Assets" ]]; then
   cp -R "$ROOT/Support/Assets/." "$APP/Contents/Resources/"
 fi

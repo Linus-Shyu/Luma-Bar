@@ -5,6 +5,7 @@ let isAppStore = Context.environment["LUMA_APP_STORE"] == "1"
 
 let package = Package(
     name: "LumaBar",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v14)
     ],
@@ -15,6 +16,9 @@ let package = Package(
         .executableTarget(
             name: "LumaBar",
             path: "Sources/LumaBar",
+            resources: [
+                .process("Resources")
+            ],
             swiftSettings: isAppStore ? [.define("LUMA_APP_STORE")] : []
         )
     ]
