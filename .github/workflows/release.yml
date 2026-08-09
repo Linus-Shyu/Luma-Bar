@@ -20,24 +20,47 @@ env:
 jobs:
   release:
     name: Build · Sign · Notarize
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 90
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode
+      - name: Select Xcode (Swift 6)
         run: |
           set -euo pipefail
-          # Prefer a recent stable Xcode on the runner image.
-          if [[ -d "/Applications/Xcode_15.4.app" ]]; then
-            sudo xcode-select -s /Applications/Xcode_15.4.app
-          elif [[ -d "/Applications/Xcode_16.0.app" ]]; then
-            sudo xcode-select -s /Applications/Xcode_16.0.app
+          echo "Available Xcode apps:"
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+
+          # Package.swift requires tools-version 6.0 → need Xcode 16+.
+          SELECTED=""
+          for candidate in \
+            /Applications/Xcode_16.4.app \
+            /Applications/Xcode_16.3.app \
+            /Applications/Xcode_16.2.app \
+            /Applications/Xcode_16.1.app \
+            /Applications/Xcode_16.0.app \
+            /Applications/Xcode_16.app \
+            /Applications/Xcode.app
+          do
+            if [[ -d "$candidate" ]]; then
+              SELECTED="$candidate"
+              break
+            fi
+          done
+
+          if [[ -z "$SELECTED" ]]; then
+            echo "error: no Xcode 16+ found for Swift 6" >&2
+            exit 1
           fi
+
+          sudo xcode-select -s "$SELECTED/Contents/Developer"
+          echo "Selected: $SELECTED"
           xcodebuild -version
           swift --version
+          swift --version | grep -E 'Swift version 6\.' >/dev/null \
+            || { echo "error: selected toolchain is not Swift 6" >&2; exit 1; }
 
       - name: Sync marketing version from tag
         run: |
