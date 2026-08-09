@@ -64,11 +64,34 @@ xcodebuild -exportArchive \
 
 ---
 
-## 4. 触发方式
+## 4. 版本命名（内部 vs 对外）
+
+Tag 必须匹配 `v*`，且营销版本形如 `X.Y.Z`（可带后缀）：
+
+| 阶段 | Tag 示例 | GitHub Release |
+|------|----------|----------------|
+| 内部开发 | `v0.5.0-dev.1`、`v0.5.0-dev.2` | **Pre-release**（标题带 Internal） |
+| 临近公开 | `v1.0.0-rc.1` | **Pre-release** |
+| 正式对外 | `v1.0.0`（无 `-` 后缀） | 正式 Latest |
+
+规则：tag 名里只要有 `-`（`-dev` / `-rc` 等），流水线自动标 prerelease。正式公众版只用纯 `vX.Y.Z`。
+
+不要用连续的 `v0.4.0`…`v0.4.5` 这类 tag 去「重试 CI」——改 Secrets / 修脚本后，对**同一个**内部 tag 用 `gh workflow run` 不适用（本 workflow 只听 tag push）；应推下一个 `-dev.N`，或修完后再打新 tag。
+
+有意义的回滚基线（勿随便删）：`v0.3.0`（Liquid Glass）、当前内部公证通的 `v0.4.6` 等。
+
+---
+
+## 5. 触发方式
 
 ```bash
-git tag -a v0.4.0 -m "Release v0.4.0"
-git push origin v0.4.0
+# 内部开发包
+git tag -a v0.5.0-dev.1 -m "internal: ..."
+git push origin v0.5.0-dev.1
+
+# 正式对外（公开日）
+git tag -a v1.0.0 -m "public launch"
+git push origin v1.0.0
 ```
 
 流水线会：
@@ -76,11 +99,11 @@ git push origin v0.4.0
 1. 用 tag 写入 `CFBundleShortVersionString`，用 `github.run_number` 写 `CFBundleVersion`
 2. 导入证书到临时 keychain
 3. 跑 `scripts/ci_release.sh`（universal 构建 + 签名 + 公证 + staple）
-4. 产出 `.zip` / `.dmg` / `.app`，并创建 GitHub Release
+4. 产出 `.zip` / `.dmg` / `.app`，并创建 GitHub Release（带 `-` 则为 pre-release）
 
 ---
 
-## 5. 本地试跑（有证书时）
+## 6. 本地试跑（有证书时）
 
 ```bash
 export LUMA_BAR_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
@@ -98,7 +121,7 @@ export LUMA_BAR_MAKE_DMG=1
 
 ---
 
-## 6. 常见失败
+## 7. 常见失败
 
 | 现象 | 处理 |
 |------|------|

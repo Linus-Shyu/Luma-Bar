@@ -191,27 +191,59 @@ jobs:
             dist/luma bar.app
           if-no-files-found: error
 
+      - name: Release metadata (internal vs public)
+        id: relmeta
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "title=Luma Bar ${TAG} (Internal)" >> "$GITHUB_OUTPUT"
+            {
+              echo "body<<EOF"
+              echo "## Luma Bar ${TAG} (Internal / pre-release)"
+              echo ""
+              echo "Internal development build — not a public launch."
+              echo ""
+              echo "Developer ID signed · notarized · stapled."
+              echo ""
+              echo "- Download the \`.dmg\` (preferred) or \`.zip\`"
+              echo "- Drag **luma bar.app** to Applications"
+              echo "- First launch may still ask for Accessibility / Automation / Microphone as designed"
+              echo ""
+              echo "Built by GitHub Actions run ${GITHUB_RUN_ID}."
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "title=Luma Bar ${TAG}" >> "$GITHUB_OUTPUT"
+            {
+              echo "body<<EOF"
+              echo "## Luma Bar ${TAG}"
+              echo ""
+              echo "Public release. Developer ID signed · notarized · stapled."
+              echo ""
+              echo "- Download the \`.dmg\` (preferred) or \`.zip\`"
+              echo "- Drag **luma bar.app** to Applications"
+              echo "- First launch may still ask for Accessibility / Automation / Microphone as designed"
+              echo ""
+              echo "Built by GitHub Actions run ${GITHUB_RUN_ID}."
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: Luma Bar ${{ github.ref_name }}
+          name: ${{ steps.relmeta.outputs.title }}
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ steps.relmeta.outputs.prerelease }}
           fail_on_unmatched_files: true
           files: |
             dist/*.zip
             dist/*.dmg
-          body: |
-            ## Luma Bar ${{ github.ref_name }}
-
-            Developer ID signed · notarized · stapled.
-
-            - Download the `.dmg` (preferred) or `.zip`
-            - Drag **luma bar.app** to Applications
-            - First launch may still ask for Accessibility / Automation / Microphone as designed
-
-            Built by GitHub Actions run ${{ github.run_id }}.
+          body: ${{ steps.relmeta.outputs.body }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
