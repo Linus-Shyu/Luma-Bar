@@ -328,6 +328,91 @@ private enum NotchMetrics {
     static let expandedCollapseButton: CGFloat = 28
     static let expandedModePillWidth: CGFloat = 30
     static let expandedModePillSpacing: CGFloat = 4
+    /// Breathing room kept between the island and the nearest menu-bar icon.
+    static let statusItemClearance: CGFloat = 8
+    /// Floors for the centered avoidance shrink: below these the compact row
+    /// can no longer show artwork on the left or the transport on the right.
+    static let compactLeftMinWidth: CGFloat = 96
+    static let compactRightMinWidth: CGFloat = 96
+    static let compactGapMinWidth: CGFloat = 28
+}
+
+/// Menu-bar status items live at window layer 25 — the same layer the island
+/// sits on — so the island silently covers other apps' icons. Probing their
+/// leftmost edge lets the compact layout stay centered and shrink instead.
+private enum MenuBarStatusItemProbe {
+    private static let statusItemLayer = 25
+    /// Widest plausible single status item; anything larger is a full-width
+    /// menu-bar backdrop rather than an icon.
+    private static let maxItemWidth: CGFloat = 400
+    private static let maxItemHeight: CGFloat = 40
+    private static let minInterval: TimeInterval = 1.0
+
+    private nonisolated(unsafe) static var cache: [CGDirectDisplayID: (edge: CGFloat?, at: Date)] = [:]
+
+    /// Leftmost edge of foreign status items on `screen`, in AppKit screen
+    /// coordinates. `nil` when the screen currently shows no status items.
+    static func leftEdge(on screen: NSScreen) -> CGFloat? {
+        let displayID = screen.displayID
+        let now = Date()
+        if let cached = cache[displayID], now.timeIntervalSince(cached.at) < minInterval {
+            return cached.edge
+        }
+        let edge = probeLeftEdge(on: screen)
+        cache[displayID] = (edge, now)
+        return edge
+    }
+
+    static func invalidate() {
+        cache.removeAll()
+    }
+
+    private static func probeLeftEdge(on screen: NSScreen) -> CGFloat? {
+        guard
+            let infos = CGWindowListCopyWindowInfo(
+                [.optionOnScreenOnly, .excludeDesktopElements],
+                kCGNullWindowID
+            ) as? [[String: Any]],
+            let primaryTop = NSScreen.screens.first?.frame.maxY
+        else {
+            return nil
+        }
+
+        // CoreGraphics uses a top-left origin anchored at the primary display.
+        let bandTop = primaryTop - screen.frame.maxY
+        let ownPID = Int(ProcessInfo.processInfo.processIdentifier)
+        var leftMost: CGFloat?
+
+        for info in infos {
+            guard
+                let layer = info[kCGWindowLayer as String] as? Int,
+                layer == statusItemLayer,
+                let pid = info[kCGWindowOwnerPID as String] as? Int,
+                pid != ownPID,
+                let bounds = info[kCGWindowBounds as String] as? [String: CGFloat]
+            else {
+                continue
+            }
+            let originX = bounds["X"] ?? 0
+            let originY = bounds["Y"] ?? 0
+            let width = bounds["Width"] ?? 0
+            let height = bounds["Height"] ?? 0
+            guard width > 0, width <= maxItemWidth, height > 0, height <= maxItemHeight else { continue }
+            guard abs(originY - bandTop) <= 2 else { continue }
+            let midX = originX + width / 2
+            guard midX >= screen.frame.minX, midX <= screen.frame.maxX else { continue }
+            leftMost = min(leftMost ?? .greatestFiniteMagnitude, originX)
+        }
+
+        return leftMost
+    }
+}
+
+private extension NSScreen {
+    var displayID: CGDirectDisplayID {
+        (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)
+            .map { CGDirectDisplayID($0.uint32Value) } ?? 0
+    }
 }
 
 @MainActor
@@ -7223,6 +7308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     @objc private func screenParametersChanged() {
+        MenuBarStatusItemProbe.invalidate()
         applyLayout()
     }
 
@@ -8500,6 +8586,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             return
         }
 
+        relayoutCompactIfMenuBarAvoidanceChanged()
+
         for window in [cameraWindow, leftWindow, rightWindow] {
             guard let window else { continue }
             window.animationBehavior = .none
@@ -9480,26 +9568,92 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             return (leftFrame, cameraFrame, rightFrame, rightArea.minX - leftArea.maxX)
         }
 
-        let gap = NotchMetrics.fallbackCameraGap
+        var leftWidth = compactPreferredLeftWidth
+        var rightWidth = compactPreferredRightWidth
+        var gap = NotchMetrics.fallbackCameraGap
+        let overlap = NotchMetrics.notchEdgeOverlap
+        let centerX = screenFrame.midX
+
+        if let screen {
+            let statusLeft = MenuBarStatusItemProbe.leftEdge(on: screen)
+            let allowedMaxX = statusLeft.map { $0 - NotchMetrics.statusItemClearance } ?? screenFrame.maxX
+            let allowedMinX = screenFrame.minX + 240
+            let maxHalf = min(centerX - allowedMinX, allowedMaxX - centerX)
+            let maxTotal = max(NotchMetrics.compactGapMinWidth, maxHalf * 2)
+            let naturalTotal = leftWidth + gap + rightWidth
+            if naturalTotal > maxTotal {
+                var excess = naturalTotal - maxTotal
+                let shrinkableLeft = max(0, leftWidth - NotchMetrics.compactLeftMinWidth)
+                let shrinkableRight = max(0, rightWidth - NotchMetrics.compactRightMinWidth)
+                let capsuleBudget = shrinkableLeft + shrinkableRight
+                if capsuleBudget > 0 {
+                    let shrinkCapsules = min(excess, capsuleBudget)
+                    let leftShare = shrinkCapsules * (shrinkableLeft / capsuleBudget)
+                    leftWidth -= leftShare
+                    rightWidth -= shrinkCapsules - leftShare
+                    excess -= shrinkCapsules
+                }
+                if excess > 0 {
+                    gap = max(NotchMetrics.compactGapMinWidth, gap - excess)
+                }
+            }
+        }
+
+        let originX = centerX - (leftWidth + gap + rightWidth) / 2
+
         let leftFrame = NSRect(
-            x: screenFrame.midX - gap / 2 - compactPreferredLeftWidth,
+            x: originX,
             y: topY,
-            width: compactPreferredLeftWidth + NotchMetrics.notchEdgeOverlap,
-            height: NotchMetrics.compactHeight
-        )
-        let rightFrame = NSRect(
-            x: screenFrame.midX + gap / 2 - NotchMetrics.notchEdgeOverlap,
-            y: topY,
-            width: compactPreferredRightWidth + NotchMetrics.notchEdgeOverlap,
+            width: leftWidth + overlap,
             height: NotchMetrics.compactHeight
         )
         let cameraFrame = NSRect(
-            x: screenFrame.midX - gap / 2,
+            x: originX + leftWidth,
             y: topY,
             width: gap,
             height: NotchMetrics.compactHeight
         )
+        let rightFrame = NSRect(
+            x: originX + leftWidth + gap - overlap,
+            y: topY,
+            width: rightWidth + overlap,
+            height: NotchMetrics.compactHeight
+        )
         return (leftFrame, cameraFrame, rightFrame, gap)
+    }
+
+    private func relayoutCompactIfMenuBarAvoidanceChanged() {
+        guard let screen = islandScreen else { return }
+        if let leftArea = screen.auxiliaryTopLeftArea,
+           let rightArea = screen.auxiliaryTopRightArea,
+           rightArea.minX > leftArea.maxX
+        {
+            return
+        }
+
+        let layout = notchLayout()
+        let widthChanged =
+            abs((leftWindow?.frame.width ?? 0) - layout.leftFrame.width) > 0.5
+            || abs((rightWindow?.frame.width ?? 0) - layout.rightFrame.width) > 0.5
+        let positionChanged =
+            abs((leftWindow?.frame.minX ?? 0) - layout.leftFrame.minX) > 0.5
+            || abs((rightWindow?.frame.minX ?? 0) - layout.rightFrame.minX) > 0.5
+        guard widthChanged || positionChanged else { return }
+
+        if widthChanged {
+            applyLayout()
+            return
+        }
+
+        leftWindow?.setFrame(layout.leftFrame, display: true)
+        cameraWindow?.setFrame(
+            layout.leftFrame.union(layout.cameraFrame).union(layout.rightFrame),
+            display: true
+        )
+        rightWindow?.setFrame(layout.rightFrame, display: true)
+        if model.isExpanded {
+            expandedWindow?.setFrame(expandedFrame(), display: true)
+        }
     }
 
     private func expandedFrame() -> NSRect {

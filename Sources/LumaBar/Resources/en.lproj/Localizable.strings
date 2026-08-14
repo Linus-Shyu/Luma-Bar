@@ -27,7 +27,7 @@
 "menu.paste" = "Paste";
 "menu.select_all" = "Select All";
 "about.ok" = "OK";
-"about.version_format" = "Version %@ (%@)\\n\\n%@";
+"about.version_format" = "Version %@ (%@)\n\n%@";
 "help.window_title" = "Help & Shortcuts";
 "help.title" = "Help";
 "help.subtitle" = "Shortcuts and everyday actions";

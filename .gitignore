@@ -9,4 +9,6 @@ work/
 DerivedData/
 dist/
 Sources/LumaBar/BundledAgentSecrets.swift
+xcuserdata/
+*.xcuserstate
 

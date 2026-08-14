@@ -99,7 +99,9 @@ enum LumaBarL10n {
     static var aboutOK: String { tr("about.ok", "OK") }
 
     static func aboutVersion(version: String, build: String, copyright: String) -> String {
-        String(format: tr("about.version_format", "Version %@ (%@)\n\n%@"), locale: resolvedLocale, version, build, copyright)
+        let format = tr("about.version_format", "Version %@ (%@)\n\n%@")
+            .replacingOccurrences(of: "\\n", with: "\n")
+        return String(format: format, locale: resolvedLocale, version, build, copyright)
     }
 
     // MARK: Help

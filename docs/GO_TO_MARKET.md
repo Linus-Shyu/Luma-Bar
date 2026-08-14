@@ -8,8 +8,10 @@
 - [APP_REVIEW_NOTES.md](APP_REVIEW_NOTES.md) — 审核备注  
 - [PRIVACY_POLICY_STUB.md](PRIVACY_POLICY_STUB.md) — 隐私政策草稿  
 
-本地商店向构建：
+本地商店向构建（SwiftPM 沙盒包，仅自测）：
 
 ```bash
 ./build_app_store.sh
 ```
+
+提交商店请打开 `LumaBar.xcodeproj`，Scheme **luma bar**，**Product → Archive**。步骤见 [APP_STORE.md](APP_STORE.md)。

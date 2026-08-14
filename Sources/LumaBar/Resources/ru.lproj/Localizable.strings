@@ -27,7 +27,7 @@
 "menu.paste" = "Вставить";
 "menu.select_all" = "Выбрать всё";
 "about.ok" = "OK";
-"about.version_format" = "Версия %@ (%@)\\n\\n%@";
+"about.version_format" = "Версия %@ (%@)\n\n%@";
 "help.window_title" = "Справка и сокращения";
 "help.title" = "Справка";
 "help.subtitle" = "Сокращения и повседневные действия";

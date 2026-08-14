@@ -19,6 +19,8 @@
 	</array>
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
+	<key>com.apple.security.personal-information.addressbook</key>
+	<true/>
 	<key>com.apple.security.personal-information.music-library</key>
 	<true/>
 </dict>

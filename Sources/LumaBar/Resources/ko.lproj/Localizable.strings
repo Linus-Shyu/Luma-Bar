@@ -27,7 +27,7 @@
 "menu.paste" = "붙여넣기";
 "menu.select_all" = "모두 선택";
 "about.ok" = "확인";
-"about.version_format" = "버전 %@ (%@)\\n\\n%@";
+"about.version_format" = "버전 %@ (%@)\n\n%@";
 "help.window_title" = "도움말 및 단축키";
 "help.title" = "도움말";
 "help.subtitle" = "단축키와 일상 작업";

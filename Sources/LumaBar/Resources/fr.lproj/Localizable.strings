@@ -27,7 +27,7 @@
 "menu.paste" = "Coller";
 "menu.select_all" = "Tout sélectionner";
 "about.ok" = "OK";
-"about.version_format" = "Version %@ (%@)\\\\n\\\\n%@";
+"about.version_format" = "Version %@ (%@)\n\n%@";
 "help.window_title" = "Aide et raccourcis";
 "help.title" = "Aide";
 "help.subtitle" = "Raccourcis et actions du quotidien";

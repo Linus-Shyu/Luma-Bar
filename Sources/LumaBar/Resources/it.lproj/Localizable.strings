@@ -27,7 +27,7 @@
 "menu.paste" = "Incolla";
 "menu.select_all" = "Seleziona tutto";
 "about.ok" = "OK";
-"about.version_format" = "Versione %@ (%@)\\n\\n%@";
+"about.version_format" = "Versione %@ (%@)\n\n%@";
 "help.window_title" = "Guida e scorciatoie";
 "help.title" = "Guida";
 "help.subtitle" = "Scorciatoie e azioni quotidiane";

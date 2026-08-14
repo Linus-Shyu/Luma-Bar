@@ -27,7 +27,7 @@
 "menu.paste" = "ペースト";
 "menu.select_all" = "すべてを選択";
 "about.ok" = "OK";
-"about.version_format" = "バージョン %@（%@）\\n\\n%@";
+"about.version_format" = "バージョン %@（%@）\n\n%@";
 "help.window_title" = "ヘルプとショートカット";
 "help.title" = "ヘルプ";
 "help.subtitle" = "ショートカットと日常操作";

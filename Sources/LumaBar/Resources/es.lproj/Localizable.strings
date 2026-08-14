@@ -27,7 +27,7 @@
 "menu.paste" = "Pegar";
 "menu.select_all" = "Seleccionar todo";
 "about.ok" = "OK";
-"about.version_format" = "Versión %@ (%@)\\n\\n%@";
+"about.version_format" = "Versión %@ (%@)\n\n%@";
 "help.window_title" = "Ayuda y atajos";
 "help.title" = "Ayuda";
 "help.subtitle" = "Atajos y acciones cotidianas";

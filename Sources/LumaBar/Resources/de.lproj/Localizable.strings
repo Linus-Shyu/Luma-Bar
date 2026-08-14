@@ -27,7 +27,7 @@
 "menu.paste" = "Einsetzen";
 "menu.select_all" = "Alles auswählen";
 "about.ok" = "OK";
-"about.version_format" = "Version %@ (%@)\\\\n\\\\n%@";
+"about.version_format" = "Version %@ (%@)\n\n%@";
 "help.window_title" = "Hilfe & Kurzbefehle";
 "help.title" = "Hilfe";
 "help.subtitle" = "Kurzbefehle und Alltag";

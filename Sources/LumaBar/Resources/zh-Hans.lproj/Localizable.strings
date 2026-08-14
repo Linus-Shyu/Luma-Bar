@@ -27,7 +27,7 @@
 "menu.paste" = "粘贴";
 "menu.select_all" = "全选";
 "about.ok" = "好";
-"about.version_format" = "版本 %@（%@）\\n\\n%@";
+"about.version_format" = "版本 %@（%@）\n\n%@";
 "help.window_title" = "使用指南";
 "help.title" = "使用指南";
 "help.subtitle" = "快捷键与常用操作速查";

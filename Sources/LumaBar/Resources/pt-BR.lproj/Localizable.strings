@@ -27,7 +27,7 @@
 "menu.paste" = "Colar";
 "menu.select_all" = "Selecionar tudo";
 "about.ok" = "OK";
-"about.version_format" = "Versão %@ (%@)\\n\\n%@";
+"about.version_format" = "Versão %@ (%@)\n\n%@";
 "help.window_title" = "Ajuda e atalhos";
 "help.title" = "Ajuda";
 "help.subtitle" = "Atalhos e ações do dia a dia";

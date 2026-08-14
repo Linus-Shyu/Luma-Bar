@@ -12,8 +12,6 @@
 	<string>com.lumabar.app</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>luma bar</string>
 	<key>CFBundleLocalizations</key>
 	<array>
 		<string>en</string>
@@ -28,16 +26,20 @@
 		<string>it</string>
 		<string>ru</string>
 	</array>
+	<key>CFBundleName</key>
+	<string>luma bar</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.3.3</string>
+	<string>1.0.0</string>
 	<key>CFBundleVersion</key>
-	<string>7</string>
-	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2026 Luma Bar Core Team</string>
+	<string>9</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Luma Bar requires permission to control Apple Music and NetEase Cloud Music via AppleScript to synchronize playback status and display lyrics.</string>
 	<key>NSContactsUsageDescription</key>
@@ -50,6 +52,8 @@
 	<string>luma bar may access Downloads only for files you select or Agent actions you confirm.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 Luma Bar Core Team</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Luma Bar uses the microphone only when you start Voice Whisper, to turn speech into text.</string>
 	<key>NSNetworkVolumesUsageDescription</key>
