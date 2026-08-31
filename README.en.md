@@ -1,79 +1,72 @@
-# Luma Bar
-
-> A living workspace around your MacBook notch.
-
-**English** | [简体中文](README.md)
-
-[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111827?logo=apple)](https://www.apple.com/macos/)
-[![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/Linus-Shyu/Luma-Bar?style=social)](https://github.com/Linus-Shyu/Luma-Bar/stargazers)
-[![Download](https://img.shields.io/github/v/release/Linus-Shyu/Luma-Bar?label=Download&logo=github)](https://github.com/Linus-Shyu/Luma-Bar/releases/latest)
-
-**Open source · MIT** — Star, fork, and PRs welcome.
-
-Luma Bar is a native macOS Dynamic Island built around the MacBook camera notch. It combines music playback, a context-aware local agent, voice input, task notifications, system controls, and a small desktop pet in one lightweight interface.
-
 <p align="center">
-  <img src="docs/images/luma-bar-agent.png" alt="Luma Bar Agent reading and translating the active webpage" width="100%">
-</p>
-<p align="center">
-  <sub>The workspace stays in context: read, translate, act, and notify without leaving the screen.</sub>
+  <img src="docs/images/branding/luma-bar-logo-icon.png" alt="Luma Bar" width="128" height="128">
 </p>
 
-## Highlights
-
-- **Notch-native interface** — uses the areas beside the MacBook camera notch without covering the camera area.
-- **Music and lyrics** — scans local audio, reads NetEase Cloud Music playlists, follows live playback, and loads artwork, progress, and synchronized lyrics.
-- **Local AI agent** — OpenAI-powered streaming responses, persistent preferences, recent-operation context, and confirmed local actions.
-- **Cursor and Codex awareness** — displays context-window usage and shows an in-notch alert when an individual task finishes.
-- **Voice Whisper** — press `⌘ ⇧ M` to dictate Chinese text directly into the Agent input.
-- **macOS controls** — control playback, volume, brightness, Wi-Fi, appearance, applications, Messages, and screen locking.
-- **Contextual desktop pet** — reacts to time, weather, and the active application.
-- **Fullscreen friendly** — hides and restores the island and pet around fullscreen Space transitions.
-- **Multiple visual themes** — includes AdventureX, glass, and pixel-pet inspired styles.
-
-## Screenshots
-
-### Music becomes part of the notch
-
-Artwork, playlists, playback controls, progress, and synchronized lyrics live in one expanded surface. The AdventureX theme turns the player into a tactile hardware console.
+<h1 align="center">Luma Bar</h1>
 
 <p align="center">
-  <img src="docs/images/luma-bar-music.png" alt="Luma Bar AdventureX music dashboard with lyrics and playlists" width="100%">
+  <strong>A native workspace that grows around the MacBook notch</strong><br>
+  Music · local AI agent · voice · task alerts · system controls · desktop pet
 </p>
-
-### A system monitor with personality
-
-Live CPU, memory, disk, battery, network, and uptime metrics share the desktop with a context-aware pixel pet.
 
 <p align="center">
-  <img src="docs/images/luma-bar-system-pet.png" alt="Luma Bar system dashboard and contextual pixel cat" width="100%">
+  <strong>English</strong> ·
+  <a href="README.md">简体中文</a> ·
+  <a href="https://github.com/Linus-Shyu/Luma-Bar/releases/latest">Download</a> ·
+  <a href="#build--run">Build</a> ·
+  <a href="#contributing">Contribute</a>
 </p>
-
-### Cursor context at the limit
-
-When Cursor or Codex approaches the context-window ceiling, the notch expands into a live usage gauge and the desktop pet warns you before the session collapses.
 
 <p align="center">
-  <img src="docs/images/luma-bar-context-limit.png" alt="Luma Bar Cursor context window at 98% with pixel pet warning" width="100%">
+  <a href="https://github.com/Linus-Shyu/Luma-Bar/releases/latest"><img src="https://img.shields.io/github/v/release/Linus-Shyu/Luma-Bar?style=flat&label=release&logo=github" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Linus-Shyu/Luma-Bar?style=flat" alt="MIT License"></a>
+  <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14%2B-111827?style=flat&logo=apple" alt="macOS 14+"></a>
+  <a href="https://www.swift.org/"><img src="https://img.shields.io/badge/Swift-6-F05138?style=flat&logo=swift&logoColor=white" alt="Swift 6"></a>
+  <a href="https://github.com/Linus-Shyu/Luma-Bar/stargazers"><img src="https://img.shields.io/github/stars/Linus-Shyu/Luma-Bar?style=flat" alt="Stars"></a>
+  <a href="https://github.com/Linus-Shyu/Luma-Bar/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/Linus-Shyu/Luma-Bar/release.yml?branch=main&style=flat&label=release%20CI" alt="Release CI"></a>
 </p>
 
-## Download
+<p align="center">
+  <img src="https://img.shields.io/badge/AdventureX%202026-AWS%20China%202nd%20Prize-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AdventureX 2026 · Amazon Web Services China 2nd Prize">
+</p>
 
-Grab the notarized DMG / ZIP from this repo’s [Releases](https://github.com/Linus-Shyu/Luma-Bar/releases/latest). If you like the project, a [★ Star](https://github.com/Linus-Shyu/Luma-Bar) helps a lot.
+<p align="center">
+  <em>🏆 AdventureX 2026 · Amazon Web Services (亚马逊云科技) track · 2nd Prize</em>
+</p>
 
-## Requirements
+<br>
 
-- macOS 14 or later
-- A Mac with Swift 6 toolchain installed
-- A MacBook with a camera notch is recommended
-- NetEase Cloud Music for NetEase playlist and `.ncm` integration
-- An OpenAI API key for remote-model features
+<p align="center">
+  <img src="docs/images/luma-bar-agent.png" alt="Luma Bar Agent reading and translating the active webpage" width="92%">
+</p>
+<p align="center">
+  <sub>Stay in context: read, translate, act, and notify without leaving the screen.</sub>
+</p>
 
-## Build and run
+## Why Luma Bar
 
-Clone the repository and run:
+Most menu-bar tools do one job. Luma Bar turns the **safe areas beside the camera notch** into a real workspace — music, a local agent, Cursor / Codex awareness, and macOS controls — without covering the camera.
+
+| | |
+|:--|:--|
+| **Notch-native** | Uses `auxiliaryTopLeftArea` / `auxiliaryTopRightArea`; camera stays clear |
+| **Music & lyrics** | Local audio, NetEase playlists, live artwork / progress / synced lyrics |
+| **Local AI agent** | Streaming replies, preferences, recent context, confirmed local actions |
+| **Cursor / Codex** | Context-window usage + in-notch completion alerts |
+| **Voice Whisper** | `⌘ ⇧ M` dictation into the Agent input |
+| **macOS controls** | Playback, volume, brightness, Wi-Fi, appearance, apps, Messages, lock |
+| **Desktop pet** | Reacts to time, weather, and the frontmost app |
+| **Fullscreen-friendly** | Smooth hide / restore across Spaces and fullscreen |
+
+## Quick start
+
+### Download (recommended)
+
+Get a **notarized** DMG / ZIP from [Releases](https://github.com/Linus-Shyu/Luma-Bar/releases/latest).
+
+If Luma Bar is useful to you, a [★ Star](https://github.com/Linus-Shyu/Luma-Bar) goes a long way.
+
+### Build from source
 
 ```bash
 git clone https://github.com/Linus-Shyu/Luma-Bar.git
@@ -82,71 +75,81 @@ cd Luma-Bar
 open "luma bar.app"
 ```
 
-For development:
+For day-to-day development:
 
 ```bash
 swift build
 ./run.sh
 ```
 
-`build_app.sh` creates and signs a local `luma bar.app` bundle. Generated application bundles, build products, and local working data are excluded from Git.
+Requires **macOS 14+** and a Swift 6 toolchain. A notched MacBook is recommended. NetEase / `.ncm` needs NetEase Cloud Music installed; remote models need an OpenAI API key.
 
-## Permissions
+## Screenshots
 
-Luma Bar may request the following macOS permissions depending on the features you use:
+<details open>
+<summary><strong>Music in the notch</strong></summary>
+<br>
+<p align="center">
+  <img src="docs/images/luma-bar-music.png" alt="Music dashboard with lyrics and playlists" width="92%">
+</p>
+</details>
 
-- Accessibility, for focused-window context and fullscreen detection
-- Microphone and Speech Recognition, for Voice Whisper
-- Automation, for controlling Music, Messages, and system appearance
-- Contacts, for resolving message recipients
-- Full Disk Access, only if Cursor or Codex keep their session data in a protected location
+<details>
+<summary><strong>A system monitor with personality</strong></summary>
+<br>
+<p align="center">
+  <img src="docs/images/luma-bar-system-pet.png" alt="System dashboard and pixel pet" width="92%">
+</p>
+</details>
 
-Cursor and Codex completion alerts are drawn inside the notch and do not use Notification Center, so no notification permission is required.
+<details>
+<summary><strong>When context is nearly full</strong></summary>
+<br>
+<p align="center">
+  <img src="docs/images/luma-bar-context-limit.png" alt="Cursor context usage gauge" width="92%">
+</p>
+</details>
 
-Grant only the permissions needed by the features you intend to use.
+## Permissions & privacy
 
-## Agent provider
+Grant only what you use: Accessibility, Microphone / Speech Recognition, Automation, Contacts; Full Disk Access only if Cursor / Codex data lives in a protected location. Completion alerts are drawn in the notch — **no Notification Center permission**.
 
-API keys are stored in macOS Keychain and are never committed to the repository.
-
-Supported environment variables:
+Luma Bar is **local-first**: API keys stay in Keychain (never in Git); recent operational context expires; remote calls happen only when you invoke Agent features that need them.
 
 ```bash
 export OPENAI_API_KEY="..."
 export LUMA_BAR_OPENAI_MODEL="..."
 ```
 
-You can also save the key from the Agent dashboard.
+You can also save the key from the Agent panel.
 
-## How it works
+## Stack (short)
 
-- **SwiftUI** renders the compact bar, expanded dashboards, notifications, and themes.
-- **AppKit** manages borderless `NSPanel` windows around the notch and desktop pet.
-- **MediaRemote / AVFoundation** provide live playback state and direct local playback.
-- **SQLite** reads local Cursor, Codex, and NetEase metadata where available.
-- **Accessibility APIs** provide active-window context and reliable fullscreen detection.
-- **Keychain** stores model-provider credentials locally.
+- **SwiftUI** — compact bar, expanded panels, themes
+- **AppKit** — borderless `NSPanel` (island + pet)
+- **MediaRemote / AVFoundation** — playback state and local audio
+- **SQLite** — Cursor / Codex / NetEase metadata when available
+- **Keychain** — provider credentials
 
-The compact island uses `NSScreen.auxiliaryTopLeftArea` and `auxiliaryTopRightArea`, keeping the center camera area untouched.
+## Recognition
 
-## Privacy
-
-Luma Bar is local-first. API keys remain in Keychain, and recent operational context expires automatically. Remote model requests are only sent when you invoke Agent features that require the selected provider.
-
-## AdventureX 2026
-
-Luma Bar is being developed for **AdventureX 2026**.
+**AdventureX 2026** — **Amazon Web Services (亚马逊云科技) track · 2nd Prize**
 
 `#adventurex2026`
 
-## Open source & contributing
+## Contributing
 
-Released under the [MIT License](LICENSE). You’re welcome to:
+Issues and PRs are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
-- [Star](https://github.com/Linus-Shyu/Luma-Bar) the repo
-- Open an [Issue](https://github.com/Linus-Shyu/Luma-Bar/issues)
-- Send a focused Pull Request (Liquid Glass visuals are frozen — please don’t restyle them by default)
+Keep diffs focused. **Liquid Glass visuals are frozen** — please don’t restyle them by default.
 
-## Status
+## License
 
-Luma Bar **1.0** is out and still actively developed. macOS APIs, media-player metadata, and third-party application storage formats may change between releases.
+[MIT](LICENSE) © Luma Bar Core Team
+
+---
+
+<p align="center">
+  If Luma Bar made your Mac a little better, consider
+  <a href="https://github.com/Linus-Shyu/Luma-Bar">starring the repo</a>.
+</p>

@@ -1,0 +1,52 @@
+name: Bug report
+description: Something broken or unexpected
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Clear repro steps help us fix it faster.
+  - type: input
+    id: version
+    attributes:
+      label: Luma Bar version
+      description: e.g. v1.0.1 from Releases, or `git describe`
+      placeholder: v1.0.1
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS + Mac
+      description: OS version and whether the Mac has a camera notch
+      placeholder: macOS 15.x · MacBook Pro 14" (notched)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: extras
+    attributes:
+      label: Screenshots / logs
+      description: Optional. Avoid pasting secrets or personal data.

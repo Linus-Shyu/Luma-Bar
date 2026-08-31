@@ -1,79 +1,72 @@
-# Luma Bar
+<p align="center">
+  <img src="docs/images/branding/luma-bar-logo-icon.png" alt="Luma Bar" width="128" height="128">
+</p>
 
-> 围绕 MacBook 刘海生长的桌面工作空间。
-
-[English](README.en.md) | **简体中文**
-
-[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111827?logo=apple)](https://www.apple.com/macos/)
-[![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/Linus-Shyu/Luma-Bar?style=social)](https://github.com/Linus-Shyu/Luma-Bar/stargazers)
-[![Download](https://img.shields.io/github/v/release/Linus-Shyu/Luma-Bar?label=Download&logo=github)](https://github.com/Linus-Shyu/Luma-Bar/releases/latest)
-
-**开源 · MIT** — 欢迎 Star、Fork、提 Issue / PR。
-
-Luma Bar 是一款围绕 MacBook 摄像头刘海打造的原生 macOS 灵动岛。它将音乐播放、上下文感知本地 Agent、语音输入、任务完成提醒、系统控制和桌面宠物整合进一个轻量界面。
+<h1 align="center">Luma Bar</h1>
 
 <p align="center">
-  <img src="docs/images/luma-bar-agent.png" alt="Luma Bar Agent 正在读取并翻译当前网页" width="100%">
+  <strong>围绕 MacBook 刘海生长的原生桌面工作空间</strong><br>
+  音乐 · 本地 AI Agent · 语音 · 任务提醒 · 系统控制 · 桌面宠物
+</p>
+
+<p align="center">
+  <a href="README.en.md">English</a> ·
+  <strong>简体中文</strong> ·
+  <a href="https://github.com/Linus-Shyu/Luma-Bar/releases/latest">下载</a> ·
+  <a href="#构建与运行">构建</a> ·
+  <a href="#贡献">贡献</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Linus-Shyu/Luma-Bar/releases/latest"><img src="https://img.shields.io/github/v/release/Linus-Shyu/Luma-Bar?style=flat&label=release&logo=github" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Linus-Shyu/Luma-Bar?style=flat" alt="MIT License"></a>
+  <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14%2B-111827?style=flat&logo=apple" alt="macOS 14+"></a>
+  <a href="https://www.swift.org/"><img src="https://img.shields.io/badge/Swift-6-F05138?style=flat&logo=swift&logoColor=white" alt="Swift 6"></a>
+  <a href="https://github.com/Linus-Shyu/Luma-Bar/stargazers"><img src="https://img.shields.io/github/stars/Linus-Shyu/Luma-Bar?style=flat" alt="Stars"></a>
+  <a href="https://github.com/Linus-Shyu/Luma-Bar/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/Linus-Shyu/Luma-Bar/release.yml?branch=main&style=flat&label=release%20CI" alt="Release CI"></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/AdventureX%202026-亚马逊云科技%20二等奖-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AdventureX 2026 · Amazon Web Services China 2nd Prize">
+</p>
+
+<p align="center">
+  <em>🏆 AdventureX 2026 · 亚马逊云科技赛道 · 二等奖</em>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="docs/images/luma-bar-agent.png" alt="Luma Bar Agent 正在读取并翻译当前网页" width="92%">
 </p>
 <p align="center">
   <sub>始终理解当前工作空间：阅读、翻译、执行和提醒，无需离开当前界面。</sub>
 </p>
 
-## 核心亮点
+## 为什么是 Luma Bar
 
-- **原生刘海布局**——利用 MacBook 摄像头两侧区域，不遮挡中间摄像头。
-- **音乐与歌词**——扫描本地音频、读取网易云音乐歌单，并展示实时封面、进度和同步歌词。
-- **本地 AI Agent**——基于 OpenAI 的流式回复、长期偏好、近期操作上下文和需确认的本地操作。
-- **Cursor 与 Codex 感知**——显示上下文窗口用量，并在单个任务完成时于刘海内弹出提醒。
-- **Voice Whisper**——按下 `⌘ ⇧ M`，将中文语音直接转写到 Agent 输入框。
-- **macOS 系统控制**——控制播放、音量、亮度、Wi-Fi、外观、应用、信息发送和锁屏。
-- **上下文桌面宠物**——根据时间、天气和当前应用主动做出反应。
-- **全屏友好**——在全屏与桌面 Space 切换时平滑隐藏和恢复灵动岛与宠物。
-- **多套视觉主题**——包含 AdventureX、玻璃和像素宠物等主题。
+多数菜单栏工具只做一件事。Luma Bar 把 **刘海两侧的原生安全区** 变成一块真正可工作的界面——播放音乐、调用本地 Agent、盯住 Cursor / Codex 上下文、控制 macOS，同时不遮挡摄像头。
 
-## 实机截图
+| | |
+|:--|:--|
+| **原生刘海** | 使用 `auxiliaryTopLeftArea` / `auxiliaryTopRightArea`，摄像头居中不被盖住 |
+| **音乐与歌词** | 本地音频、网易云歌单、实时封面 / 进度 / 同步歌词 |
+| **本地 AI Agent** | 流式回复、长期偏好、近期操作上下文、需确认的本地动作 |
+| **Cursor / Codex** | 上下文窗口用量 + 任务完成时刘海内提醒 |
+| **Voice Whisper** | `⌘ ⇧ M` 将中文语音写入 Agent 输入框 |
+| **系统控制** | 播放、音量、亮度、Wi-Fi、外观、应用、信息、锁屏 |
+| **桌面宠物** | 随时间、天气与当前应用反应 |
+| **全屏友好** | Spaces / 全屏切换时平滑隐藏与恢复 |
 
-### 让音乐成为刘海的一部分
+## 快速开始
 
-封面、歌单、播放控制、进度和同步歌词集中在同一个展开界面中。AdventureX 主题将播放器变成一块可触摸的硬件控制台。
+### 下载（推荐）
 
-<p align="center">
-  <img src="docs/images/luma-bar-music.png" alt="Luma Bar AdventureX 音乐仪表盘、歌词与歌单" width="100%">
-</p>
+从 [Releases](https://github.com/Linus-Shyu/Luma-Bar/releases/latest) 获取 **已公证** 的 DMG / ZIP，打开即可用。
 
-### 有性格的系统监视器
+喜欢这个项目？点一下 [★ Star](https://github.com/Linus-Shyu/Luma-Bar) —— 这对开源项目帮助极大。
 
-实时 CPU、内存、磁盘、电池、网络和运行时间数据，与能够感知上下文的像素宠物共同呈现在桌面上。
-
-<p align="center">
-  <img src="docs/images/luma-bar-system-pet.png" alt="Luma Bar 系统仪表盘与上下文像素猫" width="100%">
-</p>
-
-### 上下文接近上限时
-
-当 Cursor 或 Codex 的上下文窗口接近极限时，刘海会展开为实时用量仪表盘，桌面宠物也会提前提醒你，避免会话突然崩掉。
-
-<p align="center">
-  <img src="docs/images/luma-bar-context-limit.png" alt="Luma Bar Cursor 上下文窗口达到 98% 且像素猫发出提醒" width="100%">
-</p>
-
-## 下载
-
-从本仓库 [Releases](https://github.com/Linus-Shyu/Luma-Bar/releases/latest) 下载已公证的 DMG / ZIP。喜欢这个项目的话，点一下 [★ Star](https://github.com/Linus-Shyu/Luma-Bar) 会很有帮助。
-
-## 环境要求
-
-- macOS 14 或更高版本
-- 已安装 Swift 6 工具链的 Mac
-- 推荐使用带摄像头刘海的 MacBook
-- 如需网易云歌单及 `.ncm` 集成，需要安装网易云音乐
-- 如需远程模型功能，需要 OpenAI API Key
-
-## 构建与运行
-
-克隆仓库并执行：
+### 从源码构建
 
 ```bash
 git clone https://github.com/Linus-Shyu/Luma-Bar.git
@@ -82,71 +75,81 @@ cd Luma-Bar
 open "luma bar.app"
 ```
 
-开发模式：
+开发迭代：
 
 ```bash
 swift build
 ./run.sh
 ```
 
-`build_app.sh` 会创建并签名本地 `luma bar.app`。生成的应用包、构建产物和本地工作数据不会提交到 Git。
+需要 **macOS 14+**、Swift 6 工具链；推荐带摄像头刘海的 MacBook。网易云 / `.ncm` 需安装网易云音乐；远程模型需 OpenAI API Key。
 
-## 系统权限
+## 实机截图
 
-根据启用的功能，Luma Bar 可能会请求以下 macOS 权限：
+<details open>
+<summary><strong>音乐成为刘海的一部分</strong></summary>
+<br>
+<p align="center">
+  <img src="docs/images/luma-bar-music.png" alt="音乐仪表盘、歌词与歌单" width="92%">
+</p>
+</details>
 
-- 辅助功能：读取当前窗口上下文并检测全屏状态
-- 麦克风与语音识别：使用 Voice Whisper
-- 自动化：控制音乐、信息和系统外观
-- 通讯录：解析消息接收人
-- 完全磁盘访问：仅当 Cursor 或 Codex 的会话数据位于受保护目录时需要
+<details>
+<summary><strong>有性格的系统监视器</strong></summary>
+<br>
+<p align="center">
+  <img src="docs/images/luma-bar-system-pet.png" alt="系统仪表盘与像素宠物" width="92%">
+</p>
+</details>
 
-Cursor 与 Codex 的任务完成提醒直接绘制在刘海内，不走通知中心，因此无需通知权限。
+<details>
+<summary><strong>上下文接近上限时</strong></summary>
+<br>
+<p align="center">
+  <img src="docs/images/luma-bar-context-limit.png" alt="Cursor 上下文用量仪表盘" width="92%">
+</p>
+</details>
 
-只需授予你实际使用的功能所需要的权限。
+## 权限与隐私
 
-## Agent 模型
+按需授权即可：辅助功能、麦克风 / 语音识别、自动化、通讯录；仅当 Cursor / Codex 数据在受保护目录时才需要完全磁盘访问。任务完成提醒画在刘海内，**不走通知中心**。
 
-API Key 保存在 macOS 钥匙串中，不会被提交到仓库。
-
-支持以下环境变量：
+Luma Bar **本地优先**：API Key 只存钥匙串，不会进 Git；近期操作上下文会过期；只有你主动调用需要远程模型的 Agent 功能时才会发请求。
 
 ```bash
 export OPENAI_API_KEY="..."
 export LUMA_BAR_OPENAI_MODEL="..."
 ```
 
-你也可以直接在 Agent 仪表盘中保存 API Key。
+也可在 Agent 面板里直接保存 Key。
 
-## 工作原理
+## 技术栈（简）
 
-- **SwiftUI** 负责紧凑栏、展开仪表盘、通知和主题渲染。
-- **AppKit** 管理刘海周围及桌面宠物使用的无边框 `NSPanel`。
-- **MediaRemote / AVFoundation** 提供实时播放状态与本地音频播放。
-- **SQLite** 在可用时读取 Cursor、Codex 和网易云音乐的本地元数据。
-- **辅助功能 API** 提供当前窗口上下文与可靠的全屏检测。
-- **Keychain** 在本地保存模型提供商凭据。
+- **SwiftUI** — 紧凑栏、展开面板、主题
+- **AppKit** — 无边框 `NSPanel`（刘海 + 宠物）
+- **MediaRemote / AVFoundation** — 播放状态与本地播放
+- **SQLite** — Cursor / Codex / 网易云本地元数据（可用时）
+- **Keychain** — 模型凭据
 
-紧凑灵动岛使用 `NSScreen.auxiliaryTopLeftArea` 和 `auxiliaryTopRightArea`，不会覆盖中间摄像头区域。
+## 荣誉
 
-## 隐私
-
-Luma Bar 坚持本地优先。API Key 始终保存在钥匙串中，近期操作上下文会自动过期。只有在你主动调用需要远程模型的 Agent 功能时，相关请求才会发送给当前选择的模型提供商。
-
-## AdventureX 2026
-
-Luma Bar 正在为 **AdventureX 2026** 开发。
+**AdventureX 2026** — **亚马逊云科技（Amazon Web Services）赛道 · 二等奖**
 
 `#adventurex2026`
 
-## 开源与贡献
+## 贡献
 
-本项目以 [MIT License](LICENSE) 发布。欢迎：
+欢迎 Issue 与 PR。请先读 [CONTRIBUTING.md](CONTRIBUTING.md)。安全相关请看 [SECURITY.md](SECURITY.md)。
 
-- 给仓库点 [Star](https://github.com/Linus-Shyu/Luma-Bar)
-- 提 [Issue](https://github.com/Linus-Shyu/Luma-Bar/issues) 报告问题或想法
-- 提交 Pull Request（请尽量保持 diff 聚焦，Liquid Glass 视觉层已冻结，默认不要改）
+要点：保持 diff 聚焦；**Liquid Glass 视觉层已冻结**，默认请勿改动外观。
 
-## 项目状态
+## 许可证
 
-Luma Bar **1.0** 已正式发布，仍在积极迭代。macOS API、媒体播放器元数据和第三方应用的本地存储格式可能会随版本变化。
+[MIT](LICENSE) © Luma Bar Core Team
+
+---
+
+<p align="center">
+  如果 Luma Bar 让你的 Mac 更好用一点，请考虑
+  <a href="https://github.com/Linus-Shyu/Luma-Bar">给仓库一个 Star</a>。
+</p>

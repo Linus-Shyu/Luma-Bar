@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Discussions
+    url: https://github.com/Linus-Shyu/Luma-Bar/discussions
+    about: Questions, ideas, and show-and-tell (when Discussions is enabled)
+  - name: Latest release
+    url: https://github.com/Linus-Shyu/Luma-Bar/releases/latest
+    about: Download notarized builds
