@@ -10909,6 +10909,27 @@ private final class NetEaseResponseDataBox: @unchecked Sendable {
     }
 }
 
+/// Thread-safe cover URL memory for NetEase playlist rows (including never-played songs).
+private final class NetEaseTrackCoverURLCache: @unchecked Sendable {
+    static let shared = NetEaseTrackCoverURLCache()
+    private let lock = NSLock()
+    private var urls: [String: URL] = [:]
+
+    func store(_ url: URL, for id: String) {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        lock.lock()
+        urls[trimmed] = url
+        lock.unlock()
+    }
+
+    func url(for id: String) -> URL? {
+        lock.lock()
+        defer { lock.unlock() }
+        return urls[id]
+    }
+}
+
 private extension Array {
     func chunked(into size: Int) -> [ArraySlice<Element>] {
         guard size > 0 else { return [self[...]] }
@@ -11998,6 +12019,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             DispatchQueue.main.async {
                 self.netEasePlaylists = playlists
                 self.refreshMissingNetEasePlaylistCovers()
+                // Also reload the open playlist so newly favorited songs appear.
+                if let selected = self.selectedNetEasePlaylist {
+                    self.loadNetEasePlaylistTracks(selected)
+                }
             }
         }
 #endif
@@ -12165,6 +12190,15 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         // Sandbox: skip NetEase container SQLite; online playlist fetch only.
         return fetchNetEasePlaylistTracks(playlistID: playlistID, fallbackArtworkData: fallbackArtworkData)
 #else
+        // Prefer live API so newly liked / added songs appear before NetEase flushes SQLite.
+        let onlineTracks = fetchNetEasePlaylistTracks(
+            playlistID: playlistID,
+            fallbackArtworkData: fallbackArtworkData
+        )
+        if !onlineTracks.isEmpty {
+            return onlineTracks
+        }
+
         let databaseURL = home
             .appendingPathComponent("Library")
             .appendingPathComponent("Containers")
@@ -12174,7 +12208,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             .appendingPathComponent("storage")
             .appendingPathComponent("sqlite_storage.sqlite3")
         guard FileManager.default.fileExists(atPath: databaseURL.path) else {
-            return fetchNetEasePlaylistTracks(playlistID: playlistID, fallbackArtworkData: fallbackArtworkData)
+            return []
         }
 
         let playlistIDLiteral = sqliteStringLiteral(playlistID)
@@ -12261,10 +12295,10 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         guard let data = sqliteJSON(databaseURL: databaseURL, sql: sql),
               let rows = try? JSONDecoder().decode([NetEasePlaylistTrackRow].self, from: data)
         else {
-            return fetchNetEasePlaylistTracks(playlistID: playlistID, fallbackArtworkData: fallbackArtworkData)
+            return []
         }
 
-        let tracks: [LocalTrack] = rows.compactMap { row in
+        return rows.compactMap { row in
             guard !row.id.isEmpty else { return nil }
             let title = normalizedNonEmpty(row.title) ?? "Song \(row.id)"
             let artist = normalizedNonEmpty(row.artist) ?? "NetEase Cloud Music"
@@ -12272,6 +12306,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
             let coverURL = row.coverImgUrl
                 .flatMap(URL.init(string:))
                 .flatMap(normalizedNetEaseCoverURL)
+            if let coverURL {
+                rememberNetEaseTrackCoverURL(coverURL, id: row.id)
+            }
             let localURL = resolvedNetEaseLocalTrackURL(path: row.localFilePath, home: home)
             let songIDURL = URL(string: "netease-song://track/\(row.id)")
             let url = localURL ?? songIDURL ?? URL(fileURLWithPath: "/")
@@ -12300,10 +12337,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 playbackSource: playbackSource
             )
         }
-
-        return tracks.isEmpty
-            ? fetchNetEasePlaylistTracks(playlistID: playlistID, fallbackArtworkData: fallbackArtworkData)
-            : tracks
 #endif
     }
 
@@ -12357,8 +12390,15 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         var request = URLRequest(url: url)
         request.timeoutInterval = 8
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        request.setValue(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/605.1.15",
+            forHTTPHeaderField: "User-Agent"
+        )
         request.setValue("https://music.163.com/", forHTTPHeaderField: "Referer")
+        // Private playlists (e.g. 我喜欢的音乐) need the logged-in cookie jar.
+        if let session = NetEaseFavoriteController.loadSessionCookies() {
+            request.setValue(session.headerValue, forHTTPHeaderField: "Cookie")
+        }
 
         let semaphore = DispatchSemaphore(value: 0)
         let responseDataBox = NetEaseResponseDataBox()
@@ -12392,6 +12432,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 let coverURL = (album?.picUrl ?? album?.cover)
                     .flatMap(URL.init(string:))
                     .flatMap(normalizedNetEaseCoverURL)
+                if let coverURL {
+                    rememberNetEaseTrackCoverURL(coverURL, id: track.id)
+                }
                 let url = URL(string: "netease-song://track/\(track.id)") ?? URL(fileURLWithPath: "/")
 
                 return LocalTrack(
@@ -12400,6 +12443,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                     title: title,
                     artist: artist.isEmpty ? "NetEase Cloud Music" : artist,
                     album: normalizedNonEmpty(album?.name) ?? "",
+                    // Prefer cache; leave playlist cover as last resort so refresh can replace it.
                     artworkData: cachedNetEaseTrackArtworkData(id: track.id)
                         ?? coverURL.flatMap { cachedNetEaseTrackArtworkData(url: $0) }
                         ?? fallbackArtworkData,
@@ -12548,6 +12592,15 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
 
         return data
+    }
+
+    /// Cover URLs learned from playlist/song APIs — unplayed tracks often have no local SQLite art.
+    nonisolated private static func rememberNetEaseTrackCoverURL(_ url: URL, id: String) {
+        NetEaseTrackCoverURLCache.shared.store(url, for: id)
+    }
+
+    nonisolated private static func knownNetEaseTrackCoverURL(id: String) -> URL? {
+        NetEaseTrackCoverURLCache.shared.url(for: id)
     }
 
     nonisolated private static func storeNetEaseTrackArtworkData(_ data: Data, id: String) {
@@ -13248,6 +13301,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 ?? (album?["pic"] as? String)
             if let coverURL = rawURL.flatMap(URL.init(string:)).flatMap(normalizedNetEaseCoverURL) {
                 coverURLs[songID] = coverURL
+                rememberNetEaseTrackCoverURL(coverURL, id: songID)
             }
         }
 
@@ -13298,6 +13352,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     ) {
         let trackSnapshot = Array(selectedNetEasePlaylistTracks.prefix(180))
         var cachedUpdates: [(songID: String, data: Data)] = []
+        var knownURLDownloads: [(songID: String, coverURL: URL)] = []
         var candidates: [String] = []
 
         for track in trackSnapshot {
@@ -13318,7 +13373,12 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 continue
             }
 
-            if pendingNetEasePlaylistTrackArtworkIDs.insert(songID).inserted {
+            guard pendingNetEasePlaylistTrackArtworkIDs.insert(songID).inserted else { continue }
+
+            // Playlist/detail APIs already gave us picUrl for most tracks — use it first.
+            if let knownURL = Self.knownNetEaseTrackCoverURL(id: songID) {
+                knownURLDownloads.append((songID, knownURL))
+            } else {
                 candidates.append(songID)
             }
         }
@@ -13328,6 +13388,14 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                 songID: update.songID,
                 playlistID: playlistID,
                 data: update.data
+            )
+        }
+
+        for item in knownURLDownloads {
+            downloadNetEasePlaylistTrackArtwork(
+                songID: item.songID,
+                playlistID: playlistID,
+                coverURL: item.coverURL
             )
         }
 
@@ -13344,12 +13412,14 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     private func requestNetEasePlaylistTrackArtworkURLs(songIDs: [String], playlistID: String) {
         guard !songIDs.isEmpty else { return }
 
+        // Prefer v3 song/detail — the legacy /api/song/detail/ often returns empty for cold tracks.
+        let payload = songIDs.map { #"{"id":\#($0)}"# }.joined(separator: ",")
         var components = URLComponents()
         components.scheme = "https"
         components.host = "music.163.com"
-        components.path = "/api/song/detail/"
+        components.path = "/api/v3/song/detail"
         components.queryItems = [
-            URLQueryItem(name: "ids", value: "[\(songIDs.joined(separator: ","))]")
+            URLQueryItem(name: "c", value: "[\(payload)]")
         ]
         guard let url = components.url else {
             songIDs.forEach { pendingNetEasePlaylistTrackArtworkIDs.remove($0) }
@@ -13357,13 +13427,16 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         }
 
         var request = URLRequest(url: url)
-        request.timeoutInterval = 8
-        request.cachePolicy = .returnCacheDataElseLoad
+        request.timeoutInterval = 10
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("https://music.163.com/", forHTTPHeaderField: "Referer")
         request.setValue(
             "Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/605.1.15",
             forHTTPHeaderField: "User-Agent"
         )
+        if let session = NetEaseFavoriteController.loadSessionCookies() {
+            request.setValue(session.headerValue, forHTTPHeaderField: "Cookie")
+        }
 
         URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
             let coverURLs = data.map(Self.netEaseSongDetailCoverURLs(from:)) ?? [:]
@@ -13379,6 +13452,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
                         self.pendingNetEasePlaylistTrackArtworkIDs.remove(songID)
                         continue
                     }
+                    Self.rememberNetEaseTrackCoverURL(coverURL, id: songID)
 
                     self.downloadNetEasePlaylistTrackArtwork(
                         songID: songID,
@@ -17838,15 +17912,13 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     func browseNetEasePlaylist(_ playlist: NetEasePlaylist) {
         guard netEasePlaylists.contains(where: { $0.id == playlist.id }) else { return }
         let sameSelection = selectedNetEasePlaylistID == playlist.id
-        if sameSelection, !selectedNetEasePlaylistTracks.isEmpty {
-            return
-        }
 
         selectedNetEasePlaylistID = playlist.id
         if !sameSelection {
             selectedNetEasePlaylistTracks = []
             currentIndex = 0
         }
+        // Always reload — NetEase SQLite can lag behind newly liked songs.
         scanMessage = "Loading \(playlist.name)"
         loadNetEasePlaylistTracks(playlist)
     }

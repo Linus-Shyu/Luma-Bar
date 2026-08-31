@@ -6,9 +6,11 @@
 
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111827?logo=apple)](https://www.apple.com/macos/)
 [![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
-[![SwiftUI + AppKit](https://img.shields.io/badge/UI-SwiftUI%20%2B%20AppKit-2563EB)](https://developer.apple.com/xcode/swiftui/)
-[![AdventureX 2026](https://img.shields.io/badge/AdventureX-2026-F59E0B)](#adventurex-2026)
-[![Download](https://img.shields.io/badge/Download-v0.2.1%20Beta-2563EB?logo=github)](https://github.com/Linus-Shyu/Luma-Bar-Download/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/Linus-Shyu/Luma-Bar?style=social)](https://github.com/Linus-Shyu/Luma-Bar/stargazers)
+[![Download](https://img.shields.io/github/v/release/Linus-Shyu/Luma-Bar?label=Download&logo=github)](https://github.com/Linus-Shyu/Luma-Bar/releases/latest)
+
+**Open source · MIT** — Star, fork, and PRs welcome.
 
 Luma Bar is a native macOS Dynamic Island built around the MacBook camera notch. It combines music playback, a context-aware local agent, voice input, task notifications, system controls, and a small desktop pet in one lightweight interface.
 
@@ -59,7 +61,7 @@ When Cursor or Codex approaches the context-window ceiling, the notch expands in
 
 ## Download
 
-Download the ready-to-install DMG from the public [Luma Bar Download repository](https://github.com/Linus-Shyu/Luma-Bar-Download/releases/latest). The binary distribution repository contains no source code.
+Grab the notarized DMG / ZIP from this repo’s [Releases](https://github.com/Linus-Shyu/Luma-Bar/releases/latest). If you like the project, a [★ Star](https://github.com/Linus-Shyu/Luma-Bar) helps a lot.
 
 ## Requirements
 
@@ -137,6 +139,14 @@ Luma Bar is being developed for **AdventureX 2026**.
 
 `#adventurex2026`
 
+## Open source & contributing
+
+Released under the [MIT License](LICENSE). You’re welcome to:
+
+- [Star](https://github.com/Linus-Shyu/Luma-Bar) the repo
+- Open an [Issue](https://github.com/Linus-Shyu/Luma-Bar/issues)
+- Send a focused Pull Request (Liquid Glass visuals are frozen — please don’t restyle them by default)
+
 ## Status
 
-This is an active prototype. macOS APIs, media-player metadata, and third-party application storage formats may change between releases.
+Luma Bar **1.0** is out and still actively developed. macOS APIs, media-player metadata, and third-party application storage formats may change between releases.
