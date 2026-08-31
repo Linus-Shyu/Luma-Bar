@@ -27,11 +27,11 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/AdventureX%202026-亚马逊云科技%20二等奖-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AdventureX 2026 · Amazon Web Services China 2nd Prize">
+  <img src="https://img.shields.io/badge/AdventureX%202026-Quick%20Quick%20Amazon%20Quick%20二等奖-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AdventureX 2026 · Quick Quick Amazon Quick 2nd Prize">
 </p>
 
 <p align="center">
-  <em>🏆 AdventureX 2026 · 亚马逊云科技赛道 · 二等奖</em>
+  <em>🏆 AdventureX 2026 · 快快快 Quick Quick Amazon Quick 赛道 · 二等奖</em>
 </p>
 
 <br>
@@ -133,7 +133,7 @@ export LUMA_BAR_OPENAI_MODEL="..."
 
 ## 荣誉
 
-**AdventureX 2026** — **亚马逊云科技（Amazon Web Services）赛道 · 二等奖**
+**AdventureX 2026** — **快快快 Quick Quick Amazon Quick 赛道 · 二等奖**
 
 `#adventurex2026`
 

@@ -27,11 +27,11 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/AdventureX%202026-AWS%20China%202nd%20Prize-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AdventureX 2026 · Amazon Web Services China 2nd Prize">
+  <img src="https://img.shields.io/badge/AdventureX%202026-Quick%20Quick%20Amazon%20Quick%202nd%20Prize-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AdventureX 2026 · Quick Quick Amazon Quick 2nd Prize">
 </p>
 
 <p align="center">
-  <em>🏆 AdventureX 2026 · Amazon Web Services (亚马逊云科技) track · 2nd Prize</em>
+  <em>🏆 AdventureX 2026 · 快快快 Quick Quick Amazon Quick track · 2nd Prize</em>
 </p>
 
 <br>
@@ -133,7 +133,7 @@ You can also save the key from the Agent panel.
 
 ## Recognition
 
-**AdventureX 2026** — **Amazon Web Services (亚马逊云科技) track · 2nd Prize**
+**AdventureX 2026** — **快快快 Quick Quick Amazon Quick track · 2nd Prize**
 
 `#adventurex2026`
 
