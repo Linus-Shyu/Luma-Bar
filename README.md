@@ -19,7 +19,7 @@
 
 <p align="center">
   <a href="https://github.com/Linus-Shyu/Luma-Bar/releases/latest"><img src="https://img.shields.io/github/v/release/Linus-Shyu/Luma-Bar?style=flat&label=release&logo=github" alt="Latest release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Linus-Shyu/Luma-Bar?style=flat" alt="MIT License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat" alt="Apache License 2.0"></a>
   <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14%2B-111827?style=flat&logo=apple" alt="macOS 14+"></a>
   <a href="https://www.swift.org/"><img src="https://img.shields.io/badge/Swift-6-F05138?style=flat&logo=swift&logoColor=white" alt="Swift 6"></a>
   <a href="https://github.com/Linus-Shyu/Luma-Bar/stargazers"><img src="https://img.shields.io/github/stars/Linus-Shyu/Luma-Bar?style=flat" alt="Stars"></a>
@@ -42,6 +42,12 @@
 <p align="center">
   <sub>始终理解当前工作空间：阅读、翻译、执行和提醒，无需离开当前界面。</sub>
 </p>
+
+## 关于本仓库
+
+Luma Bar 以 **Apache License 2.0** 开源：可自由使用、修改、分发与商用，并附带明确的专利授权与商标保留（名称「Luma Bar」不随代码一并授权为品牌）。完整说明见 [docs/OPEN_SOURCE.md](docs/OPEN_SOURCE.md) 与 [`NOTICE`](NOTICE)。
+
+欢迎在此基础上 fork、学习或二次开发；贡献请走 Issue / PR。**请勿修改发布流水线**（`.github/workflows/`），除非维护者明确要求。
 
 ## 为什么是 Luma Bar
 
@@ -139,13 +145,13 @@ export LUMA_BAR_OPENAI_MODEL="..."
 
 ## 贡献
 
-欢迎 Issue 与 PR。请先读 [CONTRIBUTING.md](CONTRIBUTING.md)。安全相关请看 [SECURITY.md](SECURITY.md)。
+欢迎 Issue 与 PR。请先读 [CONTRIBUTING.md](CONTRIBUTING.md)、[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) 与 [SECURITY.md](SECURITY.md)。
 
-要点：保持 diff 聚焦；**Liquid Glass 视觉层已冻结**，默认请勿改动外观。
+要点：保持 diff 聚焦；**Liquid Glass 视觉层已冻结**，默认请勿改动外观；**不要改 release / notarization 流水线**。
 
 ## 许可证
 
-[MIT](LICENSE) © Luma Bar Core Team
+[Apache License 2.0](LICENSE) © Luma Bar Core Team — 见 [`NOTICE`](NOTICE)。
 
 ---
 

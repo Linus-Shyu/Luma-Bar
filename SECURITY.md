@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-We support the latest GitHub Release on `main` (currently `v1.x`). Older tags may not receive backports.
+We support the latest GitHub Release on `main` (currently `v1.x`, Apache-2.0). Older tags may not receive backports.
 
 ## Reporting a vulnerability
 

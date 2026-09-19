@@ -1,5 +1,8 @@
 # Luma Bar 商业化路径（对标 Surge Mac）
 
+> **开源说明（优先）：** 本仓库自 **v1.0.2** 起以 [Apache License 2.0](../LICENSE) 开源。  
+> 详见 [OPEN_SOURCE.md](./OPEN_SOURCE.md)。下文若与许可证冲突，以 `LICENSE` / `NOTICE` 为准。
+
 > 落地操作手册见 [GO_TO_MARKET.md](./GO_TO_MARKET.md)。
 
 > 原则：**功能不砍、不上架凑合过审；官网直销 + 买断授权 + 维护更新订阅。**  

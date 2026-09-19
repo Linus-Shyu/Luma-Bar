@@ -19,7 +19,7 @@
 
 <p align="center">
   <a href="https://github.com/Linus-Shyu/Luma-Bar/releases/latest"><img src="https://img.shields.io/github/v/release/Linus-Shyu/Luma-Bar?style=flat&label=release&logo=github" alt="Latest release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Linus-Shyu/Luma-Bar?style=flat" alt="MIT License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat" alt="Apache License 2.0"></a>
   <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14%2B-111827?style=flat&logo=apple" alt="macOS 14+"></a>
   <a href="https://www.swift.org/"><img src="https://img.shields.io/badge/Swift-6-F05138?style=flat&logo=swift&logoColor=white" alt="Swift 6"></a>
   <a href="https://github.com/Linus-Shyu/Luma-Bar/stargazers"><img src="https://img.shields.io/github/stars/Linus-Shyu/Luma-Bar?style=flat" alt="Stars"></a>
@@ -42,6 +42,12 @@
 <p align="center">
   <sub>Stay in context: read, translate, act, and notify without leaving the screen.</sub>
 </p>
+
+## About this repository
+
+Luma Bar is open source under the **Apache License 2.0**: use, modify, redistribute, and commercialize freely, with an explicit patent grant and trademark reservation (the name “Luma Bar” is not licensed as a brand merely because the code is open). See [docs/OPEN_SOURCE.md](docs/OPEN_SOURCE.md) and [`NOTICE`](NOTICE).
+
+Forks and experiments are welcome. Please open Issues / PRs for contributions. **Do not change release pipelines** under `.github/workflows/` unless maintainers ask.
 
 ## Why Luma Bar
 
@@ -139,13 +145,13 @@ You can also save the key from the Agent panel.
 
 ## Contributing
 
-Issues and PRs are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+Issues and PRs are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and [SECURITY.md](SECURITY.md).
 
-Keep diffs focused. **Liquid Glass visuals are frozen** — please don’t restyle them by default.
+Keep diffs focused. **Liquid Glass visuals are frozen** — please don’t restyle them by default. **Do not rewrite release / notarization workflows.**
 
 ## License
 
-[MIT](LICENSE) © Luma Bar Core Team
+[Apache License 2.0](LICENSE) © Luma Bar Core Team — see [`NOTICE`](NOTICE).
 
 ---
 

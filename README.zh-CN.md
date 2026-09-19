@@ -6,9 +6,12 @@
 
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111827?logo=apple)](https://www.apple.com/macos/)
 [![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![SwiftUI + AppKit](https://img.shields.io/badge/UI-SwiftUI%20%2B%20AppKit-2563EB)](https://developer.apple.com/xcode/swiftui/)
 [![AdventureX 2026](https://img.shields.io/badge/AdventureX-2026-F59E0B)](#adventurex-2026)
-[![下载](https://img.shields.io/badge/下载-v0.2.1%20Beta-2563EB?logo=github)](https://github.com/Linus-Shyu/Luma-Bar-Download/releases/latest)
+[![下载](https://img.shields.io/github/v/release/Linus-Shyu/Luma-Bar?label=%E4%B8%8B%E8%BD%BD&logo=github)](https://github.com/Linus-Shyu/Luma-Bar/releases/latest)
+
+> 完整开源说明与最新文档以根目录 [README.md](README.md) 为准（[Apache-2.0](LICENSE) · [OPEN_SOURCE.md](docs/OPEN_SOURCE.md)）。
 
 Luma Bar 是一款围绕 MacBook 摄像头刘海打造的原生 macOS 灵动岛。它将音乐播放、上下文感知本地 Agent、语音输入、任务完成提醒、系统控制和桌面宠物整合进一个轻量界面。
 
@@ -139,4 +142,8 @@ Luma Bar 正在为 **AdventureX 2026** 开发。
 
 ## 项目状态
 
-当前项目仍处于积极迭代的原型阶段。macOS API、媒体播放器元数据和第三方应用的本地存储格式可能会随版本变化。
+当前项目仍处于积极迭代。源码以 **Apache License 2.0** 开源；macOS API、媒体播放器元数据和第三方应用的本地存储格式可能会随版本变化。
+
+## 许可证
+
+[Apache License 2.0](LICENSE) © Luma Bar Core Team — 见 [NOTICE](NOTICE) 与 [docs/OPEN_SOURCE.md](docs/OPEN_SOURCE.md)。

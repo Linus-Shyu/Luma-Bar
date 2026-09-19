@@ -1,5 +1,7 @@
 # 上架与分发说明
 
+> **开源：** 源码自 v1.0.2 起为 [Apache-2.0](../LICENSE)。见 [OPEN_SOURCE.md](OPEN_SOURCE.md)。
+
 自建收款 / License / Stripe / 虎皮椒相关方案已移除。
 
 当前方向：**Mac App Store 付费单包**（沙盒合规）。详见：

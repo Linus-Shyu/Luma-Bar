@@ -2,6 +2,12 @@
 
 Thanks for helping. Small, focused changes land faster than large rewrites.
 
+Please also read:
+
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Open source / license](docs/OPEN_SOURCE.md)
+- [Security policy](SECURITY.md)
+
 ## Before you start
 
 1. Search [Issues](https://github.com/Linus-Shyu/Luma-Bar/issues) for duplicates.
@@ -24,13 +30,16 @@ Or build a local app bundle:
 open "luma bar.app"
 ```
 
+Needs **macOS 14+** and a Swift 6 toolchain. A notched MacBook is recommended for the full island layout.
+
 ## Pull requests
 
-- One concern per PR (bugfix, feature, or docs).
+- One concern per PR (bug fix, feature, or docs).
 - Prefer clear commit messages that explain *why*.
-- Do **not** commit secrets, API keys, or local `.app` / build products.
+- Use the repository PR template: summary + test plan.
+- Do **not** commit secrets, API keys, certificates, or local `.app` / build products.
 - **Liquid Glass / island chrome is frozen.** Do not restyle glass fills, panel transparency, or related theme tokens unless maintainers explicitly ask.
-- Do not change GitHub Actions release pipelines unless maintainers request it.
+- **Do not change GitHub Actions / release / notarization pipelines** (anything under `.github/workflows/`) unless maintainers request it.
 
 ## Bug reports
 
@@ -41,10 +50,7 @@ Include:
 - Steps to reproduce, expected vs actual
 - Screenshots or a short screen recording when UI-related
 
-## Code of collaboration
-
-Be respectful. Assume good intent. We follow a lightweight [Contributor Covenant](https://www.contributor-covenant.org/) spirit: harassment-free participation for everyone.
-
 ## License
 
-By contributing, you agree your contributions are licensed under the [MIT License](LICENSE).
+By contributing, you agree your contributions are licensed under the
+[Apache License 2.0](LICENSE).
