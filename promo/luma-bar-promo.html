@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Luma Bar — 宣传动画</title>
+<style>
+@font-face{
+  font-family:"Ark";
+  src:url("assets/fonts/ArkPixel12Mono-Latin.otf") format("opentype");
+  unicode-range:U+0000-00FF,U+2000-206F,U+2190-21FF,U+2460-24FF;
+  font-display:block;
+}
+@font-face{
+  font-family:"Ark";
+  src:url("assets/fonts/ArkPixel12Mono-ZHCN.otf") format("opentype");
+  font-display:block;
+}
+
+:root{
+  --ink:#0B0A09;
+  --paper:#F3ECDD;
+  --paper2:#E8DECA;
+  --paper3:#DCD0B8;
+  --line:#26231D;
+  --text:#241F19;
+  --muted:#8C8172;
+  --terra:#D9552B;
+  --moss:#2F7A4F;
+  --blue:#3B7FD4;
+  --amber:#D98A2B;
+  --mono:"SF Mono","JetBrains Mono",Menlo,monospace;
+  --han:"PingFang SC","Hiragino Sans GB","Helvetica Neue",sans-serif;
+}
+
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:#000;overflow:hidden;height:100%}
+body{display:flex;align-items:center;justify-content:center}
+
+#frame{position:relative;width:1920px;height:1080px;background:var(--ink);
+  overflow:hidden;transform-origin:center center;isolation:isolate}
+
+#desk{position:absolute;inset:0;
+  background:radial-gradient(130% 80% at 50% -10%, #1B1712 0%, #0B0A09 62%)}
+#grid{position:absolute;left:-60px;right:-60px;top:-60px;bottom:-60px;
+  background-image:radial-gradient(rgba(243,236,221,.06) 1px, transparent 1px);
+  background-size:26px 26px;will-change:transform;
+  mask-image:radial-gradient(120% 70% at 50% 0%, #000 0%, transparent 72%)}
+
+#camera{position:absolute;inset:0;transform-origin:0 0;will-change:transform}
+
+/* 14" MacBook Pro lid: ~12mm enclosure radius (~34pt), black glass face,
+   thin 3.5mm bezel. Screen clips with matching inner radius — all four corners. */
+#lid{position:absolute;left:192px;top:36px;width:1536px;height:1016px;
+  border-radius:34px;background:#050506;
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,.1),
+    0 0 0 2px #141416,
+    0 70px 140px rgba(0,0,0,.64);
+  transform-origin:50% 0;will-change:transform,opacity,filter;overflow:hidden}
+#lid::before{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.14)}
+#hinge{position:absolute;left:14%;right:14%;height:9px;bottom:0;
+  background:linear-gradient(180deg,#4A4A4E 0%,#1A1A1C 45%,#0A0A0B 100%);
+  border-radius:0;box-shadow:none;pointer-events:none}
+
+#screen{position:absolute;left:12px;top:10px;width:1512px;height:982px;
+  border-radius:22px;overflow:hidden}
+
+#notch{position:absolute;left:50%;top:0;width:185px;height:32px;
+  transform:translateX(-50%);background:#050404;
+  border-radius:0 0 16px 16px;z-index:46;pointer-events:none}
+#notch i{position:absolute;left:50%;top:10px;width:12px;height:12px;
+  transform:translateX(-50%);border-radius:50%;display:block;
+  background:radial-gradient(circle at 36% 32%, #4A6270 0%, #0D1216 70%);
+  box-shadow:0 0 0 1px rgba(255,255,255,.1)}
+#notch i::after{content:"";position:absolute;left:3px;top:2px;width:3px;height:3px;
+  border-radius:50%;background:rgba(180,215,245,.5)}
+#notch .mic{position:absolute;left:calc(50% + 22px);top:14px;width:4px;height:4px;
+  border-radius:50%;background:#070809;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);display:block}
+#wall{position:absolute;inset:0;will-change:filter;
+  background:
+    radial-gradient(70% 55% at 22% 8%, rgba(120,180,235,.42), transparent 62%),
+    radial-gradient(60% 50% at 86% 4%, rgba(92,140,210,.34), transparent 60%),
+    linear-gradient(168deg,#2F6798 0%,#1D4068 46%,#122B45 100%)}
+#walldim{position:absolute;inset:0;background:var(--ink);opacity:0;z-index:60;pointer-events:none}
+
+#menubar{position:absolute;left:0;right:0;top:0;height:32px;z-index:5;
+  display:flex;align-items:center;justify-content:space-between;padding:0 20px;
+  font-family:var(--mono);font-size:14px;letter-spacing:.02em;color:rgba(255,255,255,.86);
+  background:linear-gradient(180deg,rgba(255,255,255,.11),rgba(255,255,255,.02))}
+#menubar .l,#menubar .r{display:flex;gap:20px;align-items:center}
+#menubar .r{opacity:.8}
+#menubar .cpu{text-align:center;line-height:1.05;font-size:11px}
+#menubar .cpu b{display:block;font-size:14px}
+
+/* Compact island is 32px, flush with the top of the screen — same band as the
+   camera. It is ONE pill; it never splits and it never drops to a second row. */
+#bar{
+  position:absolute;top:0;left:50%;height:32px;width:0;
+  transform:translateX(-50%);
+  background:
+    repeating-linear-gradient(0deg,rgba(38,35,29,.035) 0 1px,transparent 1px 13px),
+    repeating-linear-gradient(90deg,rgba(38,35,29,.035) 0 1px,transparent 1px 13px),
+    linear-gradient(180deg,#F6F0E3 0%,#EBE1CE 100%);
+  border:2px solid var(--line);
+  border-radius:16px;
+  box-shadow:0 8px 18px rgba(0,0,0,.35);
+  z-index:30;overflow:hidden;will-change:width;
+}
+.wing{display:none}
+.bc{position:absolute;inset:0;display:grid;grid-template-columns:1fr 185px 1fr;
+  align-items:center;padding:3px 14px;opacity:0;white-space:nowrap}
+#cMusic{padding-bottom:6px}
+.bleft,.bright{display:flex;align-items:center;gap:6px;min-width:0}
+.bleft{justify-self:end;justify-content:flex-end;padding-right:12px}
+.bright{justify-self:start;justify-content:flex-start;padding-left:12px}
+.camgap{width:185px;height:100%}
+.bmeta{line-height:1.05;min-width:0;max-width:110px}
+.bmeta b{display:block;font-family:var(--han),var(--mono);font-size:10px;font-weight:600;color:var(--text);
+  overflow:hidden;text-overflow:ellipsis}
+.bmeta span{display:block;font-family:var(--han),var(--mono);font-size:8.5px;font-weight:500;color:var(--muted);
+  overflow:hidden;text-overflow:ellipsis}
+
+#bcover{width:20px;height:20px;border-radius:5px;flex:0 0 auto;
+  background:url("assets/cover.png") center/cover,#1a1a1a;
+  border:1px solid var(--line)}
+.bbtn{flex:0 0 auto;display:flex;align-items:center;justify-content:center}
+#bplay{width:20px;height:20px;border-radius:6px;background:var(--terra);color:#FFF3E9;
+  font-size:8px;border:0}
+#bfwd{width:16px;height:20px;color:var(--text);font-size:8px;opacity:.76}
+#bripple{position:absolute;width:20px;height:20px;border-radius:6px;
+  border:1.5px solid var(--terra);opacity:0;pointer-events:none;grid-column:1/-1}
+#bring{flex:0 0 auto;width:20px;height:20px;display:block}
+
+/* Forge compact accent rail: 3px, orange then green, along the bottom. */
+#bprog{position:absolute;left:16px;right:16px;bottom:3px;height:2px;display:flex;
+  border-radius:1px;overflow:hidden;z-index:8;pointer-events:none}
+#bprog i{display:block;height:100%}
+#bprog .p1{background:var(--terra);width:42px;flex:0 0 42px}
+#bprog .p2{background:var(--moss);flex:1 1 auto}
+
+.ring{flex:0 0 auto;position:relative;display:flex;align-items:center;justify-content:center;
+  border-radius:50%;font-family:var(--mono);font-weight:700;color:var(--terra)}
+.ring.r38{width:20px;height:20px;font-size:7px;
+  border:2px solid rgba(217,85,43,.55)}
+.ring.r28{width:20px;height:20px;font-size:7px;border:2px solid rgba(217,85,43,.55)}
+#blive{flex:0 0 auto;font-family:var(--han),var(--mono);font-size:9px;font-weight:600;color:var(--text);
+  background:#E7DDC9;border:1px solid rgba(38,35,29,.35);border-radius:999px;padding:3px 8px}
+#bpct{flex:0 0 auto;font-family:var(--han),var(--mono);font-size:11px;font-weight:700;color:var(--terra)}
+.bstat{flex:0 0 auto;font-family:var(--han),var(--mono);font-size:9px;font-weight:600;color:var(--text);
+  background:#E7DDC9;border:1px solid rgba(38,35,29,.22);border-radius:999px;padding:3px 7px}
+
+/* Expanded panel hangs just under the 32px island, matching expandedTopInset. */
+.panel{
+  position:absolute;top:40px;left:50%;transform:translateX(-50%);
+  background:
+    repeating-linear-gradient(0deg,rgba(38,35,29,.03) 0 1px,transparent 1px 15px),
+    repeating-linear-gradient(90deg,rgba(38,35,29,.03) 0 1px,transparent 1px 15px),
+    linear-gradient(180deg,#F5EFE2 0%,#EBE1CE 100%);
+  border:2px solid var(--line);border-radius:18px;
+  box-shadow:0 28px 56px rgba(0,0,0,.48);
+  z-index:20;opacity:0;transform-origin:50% 0%;will-change:transform,opacity;
+}
+.panel .pw{padding:10px 12px 12px}
+.cx{position:absolute;width:12px;height:12px;opacity:.5}
+.cx::before,.cx::after{content:"";position:absolute;background:var(--line)}
+.cx::before{left:0;top:5px;width:12px;height:1.5px}
+.cx::after{top:0;left:5px;height:12px;width:1.5px}
+.cx.tl{left:7px;top:7px}.cx.tr{right:7px;top:7px}
+.cx.bl{left:7px;bottom:7px}.cx.br{right:7px;bottom:7px}
+
+.phead{display:flex;align-items:center;gap:8px;margin-bottom:8px;height:34px}
+.phead .pc{width:32px;height:32px;border-radius:8px;flex:0 0 auto;
+  background:url("assets/cover.png") center/cover,#1a1a1a;border:1.5px solid var(--line)}
+.phead .pi{width:32px;height:32px;border-radius:50%;flex:0 0 auto;background:#E7DDC9;
+  border:1.5px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:14px}
+.phead .px{flex:1 1 auto;min-width:0}
+.phead .px b{display:block;font-family:var(--han),var(--mono);font-size:13px;font-weight:700;color:var(--text)}
+.phead .px span{display:block;font-family:var(--han),var(--mono);font-size:10px;color:var(--muted)}
+.tabs{display:flex;gap:4px;flex:0 0 auto}
+.tab{font-family:var(--han),var(--mono);font-size:10px;padding:5px 8px;border-radius:999px;
+  background:#E7DDC9;color:#5A5047;border:1px solid var(--line);white-space:nowrap}
+.tab.on{background:var(--terra);color:#FFF3E9}
+.chev{width:28px;height:28px;border-radius:999px;background:#E7DDC9;border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text);flex:0 0 auto}
+
+#mtrack{height:6px;border-radius:4px;border:1.5px solid var(--line);overflow:hidden;
+  background:repeating-linear-gradient(90deg,var(--paper3) 0 7px,transparent 7px 11px)}
+#mtrack b{display:block;height:100%;background:var(--terra);transform-origin:left center;transform:scaleX(0)}
+.prow{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;
+  color:var(--muted);margin-top:4px}
+.transport{display:flex;align-items:center;gap:8px;margin:8px 0 2px}
+.tb{width:36px;height:32px;border-radius:8px;background:#E3D8C4;border:1.5px solid var(--line);
+  display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text)}
+.tb.main{width:48px;height:40px;background:var(--terra);color:#FFF3E9;font-size:16px;
+  will-change:transform}
+.vol{margin-left:auto;display:flex;align-items:center;gap:8px}
+.vol .vt{width:110px;height:6px;border-radius:4px;background:var(--paper3);
+  border:1.5px solid var(--line);position:relative}
+.vol .vt b{position:absolute;left:0;top:0;height:100%;width:64%;background:var(--terra)}
+.vol .vk{position:absolute;left:64%;top:50%;width:12px;height:12px;border-radius:50%;
+  background:#FBF6EE;border:1.5px solid var(--line);transform:translate(-50%,-50%)}
+.pbot{display:flex;gap:8px;margin-top:8px}
+#lyr{width:218px;flex:0 0 auto;background:#EEE5D3;border-radius:10px;
+  border:1.5px solid var(--line);padding:8px 10px;overflow:hidden;box-sizing:border-box}
+#lyr .lh{font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:6px}
+#lyr p{font-family:var(--han),var(--mono);font-size:10.5px;line-height:1.5;color:#9A9083;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#lyr p.on{color:var(--terra);font-weight:700}
+#list{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:5px}
+.lrow{display:flex;align-items:center;gap:8px;background:#EEE5D3;border-radius:9px;
+  border:1.5px solid var(--line);padding:6px 8px}
+.lrow.on{border-color:var(--terra);box-shadow:inset 0 0 0 1px var(--terra)}
+.lrow i{width:24px;height:24px;border-radius:6px;flex:0 0 auto;background:var(--paper3);
+  border:1px solid var(--line);display:block}
+.lrow i.c{background:url("assets/cover.png") center/cover}
+.lrow i.c2{background:url("assets/cover-ive.png") center/cover}
+.lrow i.c3{background:url("assets/cover-nj.png") center/cover}
+.lrow b{display:block;font-family:var(--han),var(--mono);font-size:12px;color:var(--text)}
+.lrow span{display:block;font-family:var(--mono);font-size:10px;color:var(--muted)}
+
+.arow{display:flex;align-items:center;gap:6px;background:#EEE5D3;border:1.5px solid var(--line);
+  border-radius:9px;padding:5px 8px}
+.apill{font-family:var(--mono);font-size:11px;color:var(--text);background:var(--paper3);
+  border:1px solid var(--line);border-radius:7px;padding:3px 8px;flex:0 0 auto}
+.akey{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.adots{font-family:var(--mono);font-size:10px;color:#A79C8C;letter-spacing:.12em}
+.aicon{width:22px;height:22px;border-radius:6px;border:1px solid var(--line);background:var(--paper3);
+  display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--text);flex:0 0 auto}
+.aicon.warn{background:#F0D3C6;border-color:var(--terra);color:var(--terra)}
+.ameta{display:flex;justify-content:space-between;align-items:center;
+  font-family:var(--mono);font-size:10px;color:var(--muted);margin:8px 2px 6px}
+.ameta .src{color:#5A5047}
+#atext{position:relative;height:92px;background:#EEE5D3;border:1.5px solid var(--line);
+  border-radius:9px;padding:8px 16px 8px 10px;overflow:hidden}
+#atext p{font-family:var(--han);font-size:12px;line-height:1.55;color:var(--text);
+  word-break:break-word;overflow-wrap:anywhere}
+#atext p span{display:none}
+#atext .sbar{position:absolute;right:5px;top:8px;width:4px;border-radius:2px;background:#B9AC95;height:48px}
+#acaret{display:inline-block;width:6px;height:12px;background:var(--terra);
+  vertical-align:-2px;margin-left:2px}
+.achips{display:flex;gap:5px;align-items:center;margin-top:8px}
+.chip{font-family:var(--mono);font-size:10px;color:#5A5047;background:#EEE5D3;
+  border:1px solid var(--line);border-radius:8px;padding:4px 8px}
+.achips .sq{margin-left:auto;width:22px;height:22px;border-radius:6px;background:var(--line)}
+.ainput{display:flex;align-items:center;gap:6px;margin-top:8px}
+.ainput .mic{width:24px;height:24px;border-radius:7px;border:1px solid var(--line);
+  background:#EEE5D3;display:flex;align-items:center;justify-content:center;font-size:11px;flex:0 0 auto}
+.ainput .field{flex:1 1 auto;height:28px;border-radius:8px;background:#F2EADB;
+  border:1px solid var(--line);display:flex;align-items:center;padding:0 10px;
+  font-family:var(--mono);font-size:11px;color:#A79C8C}
+.ainput .send{width:28px;height:28px;border-radius:50%;background:var(--terra);
+  border:1.5px solid var(--line);flex:0 0 auto;display:flex;align-items:center;
+  justify-content:center;color:#FFF3E9;font-size:11px}
+
+#panelC .pw{padding:12px 16px 14px}
+#chandle{position:absolute;left:50%;top:-2px;width:68px;height:4px;border-radius:0 0 4px 4px;
+  background:var(--terra);transform:translateX(-50%)}
+.clabel{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;
+  letter-spacing:.16em;color:var(--terra);margin-bottom:6px}
+.clabel .d{width:5px;height:5px;border-radius:50%;background:var(--terra)}
+#crow{display:flex;align-items:center;gap:12px}
+#cbadge{width:44px;height:44px;border-radius:50%;flex:0 0 auto;
+  border:2.5px solid rgba(217,85,43,.5);box-shadow:0 0 0 3px rgba(217,85,43,.13);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:12px;font-weight:700;color:var(--terra)}
+#cmid{flex:1 1 auto;min-width:0}
+#cmid b{display:block;font-family:var(--han),var(--mono);font-size:16px;color:var(--text)}
+#cmid span{display:block;font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px}
+#cright{text-align:right;flex:0 0 auto}
+#cbig{font-family:var(--mono);font-size:28px;font-weight:700;color:var(--terra);
+  letter-spacing:-.03em;line-height:1}
+#cleft{font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:#B2634A;margin-top:3px}
+#cbar{height:8px;border-radius:5px;background:var(--paper3);border:1.5px solid var(--line);
+  margin-top:10px;overflow:hidden}
+#cbar b{display:block;height:100%;transform-origin:left center;transform:scaleX(0);
+  background:linear-gradient(90deg,#F0B08E 0%,#E27B4C 55%,#D9552B 100%)}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat{background:#EEE5D3;border-radius:10px;border:1.5px solid var(--line);padding:8px 10px}
+.stat .sh{font-family:var(--mono);font-size:10px;color:#5A5047}
+.stat .sv{font-family:var(--mono);font-size:18px;font-weight:700;color:var(--text);
+  margin:2px 0 1px;letter-spacing:-.02em}
+.stat .ss{font-family:var(--mono);font-size:9px;color:var(--muted)}
+.stat .sb{height:5px;border-radius:3px;background:var(--paper3);border:1px solid var(--line);
+  margin-top:6px;overflow:hidden}
+.stat .sb b{display:block;height:100%;transform-origin:left center;transform:scaleX(0)}
+.net{display:flex;justify-content:space-between;align-items:flex-end;margin-top:8px;
+  font-family:var(--mono);font-size:11px;color:#5A5047}
+.net span{color:var(--muted);font-size:12px;display:block;margin-top:3px}
+
+#sel{position:absolute;left:104px;top:210px;width:356px;z-index:18;opacity:0;
+  background:#F7F3EA;border:2.5px solid var(--line);border-radius:16px;
+  box-shadow:0 26px 54px rgba(0,0,0,.5);overflow:hidden;will-change:transform,opacity}
+#sel .sbar{height:32px;background:#E7DDC9;border-bottom:2px solid var(--line);
+  display:flex;align-items:center;gap:7px;padding:0 11px}
+#sel .sbar i{width:9px;height:9px;border-radius:50%;background:var(--paper3);
+  border:1.5px solid var(--line);display:block}
+#sel .sbar u{flex:1 1 auto;text-align:center;text-decoration:none;font-family:var(--mono);
+  font-size:11px;color:var(--muted)}
+#sel .body{padding:14px 16px;font-family:var(--mono);font-size:15px;line-height:1.8;color:var(--text)}
+#selhi{position:absolute;background:rgba(59,127,212,.42);border-radius:3px;
+  transform-origin:left center;transform:scaleX(0)}
+#key{position:absolute;left:348px;top:344px;z-index:23;display:flex;gap:8px;
+  opacity:0;will-change:transform,opacity}
+#key .k{font-family:var(--mono);font-size:18px;font-weight:700;color:var(--text);
+  background:#F7F3EA;border:2.5px solid var(--line);border-radius:11px;
+  padding:10px 14px;box-shadow:0 5px 0 var(--line);min-width:44px;text-align:center}
+
+#pet{position:absolute;left:0;top:0;z-index:24;opacity:0;will-change:transform;overflow:visible}
+#pet .sp{position:relative;width:104px;height:104px}
+#pet .sp img{position:absolute;inset:0;width:104px;height:104px;image-rendering:pixelated;opacity:0}
+#bub{position:absolute;left:-18px;bottom:112px;width:max-content;max-width:none;
+  background:#F7F3EA;border:2px solid var(--line);border-radius:12px;padding:8px 12px;
+  font-family:var(--han),var(--mono);font-size:13px;font-weight:500;line-height:1.35;color:var(--text);
+  white-space:nowrap;overflow:visible;
+  transform-origin:28px 100%;opacity:0;box-shadow:0 5px 0 var(--line)}
+#bub::after{content:"";position:absolute;left:22px;bottom:-7px;width:12px;height:12px;
+  background:#F7F3EA;border-right:2px solid var(--line);border-bottom:2px solid var(--line);
+  transform:rotate(45deg)}
+
+#scrim{position:absolute;left:0;right:0;bottom:0;height:500px;z-index:70;pointer-events:none;
+  background:linear-gradient(to bottom,rgba(11,10,9,0) 0%,rgba(11,10,9,.78) 42%,var(--ink) 76%)}
+#copy{position:absolute;left:118px;bottom:102px;z-index:80;width:1420px}
+#eyebrow{font-family:"Ark",var(--mono);font-size:24px;color:var(--terra);
+  margin-bottom:20px;display:flex;align-items:center;gap:14px}
+#eyebrow .ln{height:2px;width:54px;background:var(--terra);display:block;
+  transform-origin:left center;transform:scaleX(0)}
+#hl{font-family:var(--han);font-weight:600;font-size:72px;line-height:1.14;
+  letter-spacing:-.025em;color:#F3ECDD;white-space:nowrap}
+#hl span{display:inline-block;will-change:transform,opacity,filter}
+#sub{font-family:var(--mono);font-size:21px;letter-spacing:.04em;color:#A79C8C;margin-top:22px}
+#chap{position:absolute;right:118px;bottom:108px;z-index:80;text-align:right;
+  font-family:"Ark",var(--mono);font-size:24px;color:#6E6458}
+#chap .n{color:var(--terra)}
+#hair{position:absolute;left:0;top:0;height:3px;width:100%;background:var(--terra);
+  transform-origin:left center;transform:scaleX(0);z-index:90;opacity:.85}
+#flash{position:absolute;inset:0;background:#F3ECDD;opacity:0;z-index:92;pointer-events:none}
+
+#fin{position:absolute;inset:0;z-index:85;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;opacity:0;pointer-events:none}
+#glow{position:absolute;width:980px;height:980px;border-radius:50%;
+  background:radial-gradient(circle,rgba(142,124,240,.32) 0%,transparent 62%);opacity:0;
+  will-change:transform}
+#fin img{width:172px;height:172px;border-radius:40px;
+  box-shadow:0 30px 70px rgba(0,0,0,.6),0 0 0 1px rgba(243,236,221,.1);
+  will-change:transform,opacity}
+#wm{font-family:var(--han);font-weight:600;font-size:94px;letter-spacing:-.035em;
+  color:#F3ECDD;margin-top:34px;will-change:transform,opacity}
+#fmeta{font-family:var(--mono);font-size:22px;letter-spacing:.05em;color:#A79C8C;margin-top:20px}
+#fbadge{font-family:var(--han);font-weight:600;font-size:22px;color:var(--terra);
+  border:2px solid rgba(217,85,43,.55);border-radius:10px;padding:9px 18px;margin-top:28px}
+#fcredit{font-family:var(--han);font-size:18px;color:#A79C8C;margin-top:16px;letter-spacing:.04em}
+</style>
+</head>
+<body>
+<div id="frame">
+  <div id="desk"></div>
+  <div id="grid"></div>
+
+  <div id="camera">
+    <div id="lid">
+    <div id="screen">
+      <div id="wall"></div>
+      <div id="notch"><i></i><b class="mic"></b></div>
+
+      <div id="menubar">
+        <div class="l"><span>&#63743;</span><span>luma bar</span><span>Agent</span><span>Edit</span></div>
+        <div class="r">
+          <span class="cpu">CPU<b>11%</b></span>
+          <span class="cpu">MEM<b>92%</b></span>
+          <span>&#8681; 8 KB/s</span><span>31&#176;C</span><span>Wi-Fi</span><span>Thu 19:04</span>
+        </div>
+      </div>
+
+      <div id="sel">
+        <div class="sbar"><i></i><i></i><i></i><u>icml.cc / announcements</u></div>
+        <div class="body" style="position:relative">
+          <div id="selhi"></div>
+          <div style="position:relative">ICML 2026 does not<br>have any official<br>satellite meetings or<br>affiliated events.</div>
+        </div>
+      </div>
+      <div id="key"><span class="k">&#8984;</span><span class="k">C</span></div>
+
+      <div class="panel" id="panelM" style="width:460px">
+        <div class="cx tl"></div><div class="cx tr"></div><div class="cx bl"></div><div class="cx br"></div>
+        <div class="pw">
+          <div class="phead">
+            <div class="pc"></div>
+            <div class="px"><b>LIT RIGHT NOW</b><span>MEOVV &#8226; MY EYES OPEN VVIDE</span></div>
+            <div class="tabs"><div class="tab on">&#9834; Music</div><div class="tab">System</div><div class="tab">Agent</div></div>
+            <div class="chev">&#9650;</div>
+          </div>
+          <div id="mtrack"><b></b></div>
+          <div class="prow"><span id="tcur">0:16</span><span>2:34</span></div>
+          <div class="transport">
+            <div class="tb">&#9664;&#9664;</div>
+            <div class="tb main" id="ptb">&#9654;</div>
+            <div class="tb">&#9654;&#9654;</div>
+            <div class="vol">
+              <svg width="23" height="19" viewBox="0 0 20 18" fill="none" stroke="#241F19" stroke-width="1.7">
+                <path d="M2 7h3l4-3.5v11L5 11H2z" fill="#241F19" stroke-linejoin="round"></path>
+                <path d="M12.6 6.2a4 4 0 0 1 0 5.6" stroke-linecap="round"></path>
+                <path d="M15.2 4a7.2 7.2 0 0 1 0 10" stroke-linecap="round"></path>
+              </svg>
+              <div class="vt"><b></b><div class="vk"></div></div>
+            </div>
+          </div>
+          <div class="pbot">
+            <div id="lyr">
+              <div class="lh">&#9834; Lyrics</div>
+              <p data-l></p>
+              <p data-l></p>
+              <p data-l></p>
+              <p data-l></p>
+            </div>
+            <div id="list">
+              <div class="lrow on"><i class="c"></i><div><b>LIT RIGHT NOW</b><span>MEOVV</span></div></div>
+              <div class="lrow"><i class="c2"></i><div><b>REBEL HEART</b><span>IVE</span></div></div>
+              <div class="lrow"><i class="c3"></i><div><b>Super Shy</b><span>NewJeans</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="panelA" style="width:460px">
+        <div class="cx tl"></div><div class="cx tr"></div><div class="cx bl"></div><div class="cx br"></div>
+        <div class="pw">
+          <div class="phead">
+            <div class="ring r38">&#9889;</div>
+            <div class="px"><b>OpenAI Streaming</b><span id="astatus">Reading selection</span></div>
+            <div class="tabs"><div class="tab">&#9834; Music</div><div class="tab">System</div><div class="tab on">&#10022; Agent</div></div>
+            <div class="chev">&#9650;</div>
+          </div>
+          <div class="arow">
+            <div class="apill">OpenAI &#8964;</div>
+            <div class="aicon warn">&#128273;</div>
+            <div class="akey">OpenAI key saved</div>
+            <div class="adots">&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;</div>
+            <div class="grow"></div>
+            <div class="aicon">&#128203;</div>
+            <div class="aicon">&#10003;</div>
+            <div class="aicon warn">&#128465;</div>
+          </div>
+          <div class="ameta">
+            <span class="src">&#9638; Reading &#8226; Safari</span>
+            <span id="ameta2">Translating</span>
+          </div>
+          <div id="atext"><p id="atp"></p><div class="sbar"></div></div>
+          <div class="achips">
+            <div class="chip">&#9776; TL;DR</div>
+            <div class="chip">&#9733; Key Points</div>
+            <div class="chip">&#9432; Explain</div>
+            <div class="chip">&#9094; Shell</div>
+            <div class="sq"></div>
+          </div>
+          <div class="ainput">
+            <div class="mic">&#127908;</div>
+            <div class="field">Ask about this page or document</div>
+            <div class="send">&#10148;</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="panelC" style="width:420px">
+        <div id="chandle"></div>
+        <div class="pw">
+          <div class="clabel"><span class="d"></span>CURSOR CONTEXT</div>
+          <div id="crow">
+            <div id="cbadge">5.4</div>
+            <div id="cmid"><b>GPT-5.4 Sol</b><span id="cctx">Current context &#8226; 0K / 200K</span></div>
+            <div id="cright"><div id="cbig">0%</div><div id="cleft">200K LEFT</div></div>
+          </div>
+          <div id="cbar"><b></b></div>
+        </div>
+      </div>
+
+      <div class="panel" id="panelS" style="width:460px">
+        <div class="cx tl"></div><div class="cx tr"></div><div class="cx bl"></div><div class="cx br"></div>
+        <div class="pw">
+          <div class="phead">
+            <div class="pi">&#9881;</div>
+            <div class="px"><b>System Monitor</b><span>CPU 11% &#8226; MEM 92%</span></div>
+            <div class="tabs"><div class="tab">&#9834; Music</div><div class="tab on">System</div><div class="tab">Agent</div></div>
+            <div class="chev">&#9650;</div>
+          </div>
+          <div class="grid2">
+            <div class="stat"><div class="sh">CPU</div><div class="sv" data-cnt="11">0%</div><div class="ss">10 cores &#8226; load 3.02</div><div class="sb"><b style="background:#2F7A4F" data-w=".18"></b></div></div>
+            <div class="stat"><div class="sh">Memory</div><div class="sv" data-cnt="92">0%</div><div class="ss">14.73 GB / 16 GB &#8226; free 1.27 GB</div><div class="sb"><b style="background:#3B7FD4" data-w=".92"></b></div></div>
+            <div class="stat"><div class="sh">Disk</div><div class="sv" data-cnt="85">0%</div><div class="ss">392.78 GB used &#8226; 67.6 GB free</div><div class="sb"><b style="background:#D98A2B" data-w=".85"></b></div></div>
+            <div class="stat"><div class="sh">Battery</div><div class="sv" data-cnt="66">0%</div><div class="ss">AC Power &#8226; Charging</div><div class="sb"><b style="background:#2F7A4F" data-w=".66"></b></div></div>
+          </div>
+          <div class="net">
+            <div>&#8595; 108 KB/s &nbsp;&nbsp; &#8593; 6.4 MB/s<span>Total 3.49 GB &#8226; 2.37 GB</span></div>
+            <div style="text-align:right">8h 14m<span>Uptime</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="pet">
+        <div class="sp" id="sprite"></div>
+        <div id="bub">MEM 92%。建议先别开新标签。</div>
+      </div>
+
+      <div id="bar">
+        <div class="wing" id="wingL"></div>
+        <div class="wing" id="wingR"></div>
+        <div class="bc" id="cMusic">
+          <div class="bleft">
+            <div id="bcover"></div>
+            <div class="bmeta"><b>LIT RIGHT NOW</b><span>MEOVV</span></div>
+          </div>
+          <div class="camgap"></div>
+          <div class="bright">
+            <div class="bbtn" id="bplay">&#9654;</div>
+            <svg id="bring" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="#DCD0B8" stroke-width="2"/>
+              <circle id="bringarc" cx="12" cy="12" r="9" fill="none" stroke="#D9552B" stroke-width="2"
+                stroke-linecap="round" stroke-dasharray="56.55" stroke-dashoffset="56.55"
+                transform="rotate(-90 12 12)"/>
+            </svg>
+            <div class="bbtn" id="bfwd">&#9654;&#9654;</div>
+          </div>
+          <div id="bripple"></div>
+        </div>
+        <div class="bc" id="cAgent">
+          <div class="bleft">
+            <div class="ring r38">&#9889;</div>
+            <div class="bmeta"><b>OpenAI Streaming</b><span id="bastat">Reading selection</span></div>
+          </div>
+          <div class="camgap"></div>
+          <div class="bright"><div id="blive">Live</div></div>
+        </div>
+        <div class="bc" id="cCursor">
+          <div class="bleft">
+            <div class="ring r38">5.4</div>
+            <div class="bmeta"><b>GPT-5.4 Sol</b><span id="bcctx">0K / 200K</span></div>
+          </div>
+          <div class="camgap"></div>
+          <div class="bright">
+            <div class="ring r28">5.4</div>
+            <div id="bpct">0%</div>
+          </div>
+        </div>
+        <div class="bc" id="cSystem">
+          <div class="bleft">
+            <div class="ring r38" style="color:#2F7A4F;border-color:rgba(47,122,79,.55)">&#9881;</div>
+            <div class="bmeta"><b>System Monitor</b><span>CPU 11% &#8226; MEM 92%</span></div>
+          </div>
+          <div class="camgap"></div>
+          <div class="bright">
+            <div class="bstat">11%</div>
+            <div class="bstat">92%</div>
+          </div>
+        </div>
+        <div id="bprog"><i class="p1"></i><i class="p2"></i></div>
+      </div>
+
+      <div id="walldim"></div>
+    </div>
+    <div id="hinge"></div>
+    </div>
+  </div>
+
+  <div id="scrim"></div>
+
+  <div id="copy">
+    <div id="eyebrow"><span class="ln"></span><span id="ebt"></span></div>
+    <div id="hl"></div>
+    <div id="sub"></div>
+  </div>
+  <div id="chap"></div>
+
+  <div id="fin">
+    <div id="glow"></div>
+    <img src="assets/appicon.png" alt="Luma Bar">
+    <div id="wm">Luma Bar</div>
+    <div id="fmeta">Apache-2.0 &#8226; github.com/Linus-Shyu/Luma-Bar</div>
+    <div id="fbadge">AdventureX 2026 — 亚马逊云科技赛道二等奖</div>
+    <div id="fcredit">剪辑 · Linus Shyu, Co-founder</div>
+  </div>
+
+  <div id="flash"></div>
+  <div id="hair"></div>
+</div>
+
+<script>
+(() => {
+"use strict";
+
+/* ===== musical grid: 128 BPM, 4/4 (MEOVV - LIT RIGHT NOW) ===== */
+const BPM  = 128;
+const BEAT = 60 / BPM;          // 0.46875s
+const BAR  = BEAT * 4;          // 1.875s
+const M = n => n * BAR;         // bar -> seconds
+const B = n => n * BEAT;        // beat -> seconds
+const DUR = M(24);              // 45.000s
+/* Mux offset: video t=0 is song 16.865s. Music panel is on-screen ~27–32s of the track. */
+const AUDIO_AT = 16.865;
+const SONG_DUR = 154.43;
+const LRC = [
+  [4.319, "Uh, follow my lead"],
+  [6.000, "다음 판 같은 Game"],
+  [8.531, "까먹었지"],
+  [9.698, "누가 누군지 Baby"],
+  [12.320, "하나둘씩"],
+  [13.456, "They look and sound the same"],
+  [16.962, "Won't say you're wrong"],
+  [19.312, "다 타버렸지"],
+  [20.875, "Set my ego aflame"],
+  [23.134, "확 쏴버렸지"],
+  [24.694, "모두가 듣게 Bang, bang"],
+  [27.289, "한 걸음씩"],
+  [28.445, "따라와 I'm on my way"],
+  [31.962, "Won't say you're wrong"],
+  [33.402, "I'm lit right now"],
+  [36.597, "Show you what you miss when you're not around"],
+  [40.427, "I just said I'm lit right now"],
+  [43.944, "Don't make me drop it down"]
+];
+function lrcIndex(songT){
+  let i = 0;
+  for (let k = 1; k < LRC.length; k++){
+    if (LRC[k][0] > songT) break;
+    i = k;
+  }
+  return i;
+}
+
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+
+const cl = (v,a=0,b=1) => v<a?a:v>b?b:v;
+const lerp = (a,b,t) => a+(b-a)*t;
+const pr = (t,start,dur) => cl((t-start)/dur);
+const outExpo = p => p>=1?1:1-Math.pow(2,-10*p);
+const inExpo  = p => p<=0?0:Math.pow(2,10*(p-1));
+const ioCubic = p => p<.5 ? 4*p*p*p : 1-Math.pow(-2*p+2,3)/2;
+const outCubic = p => 1-Math.pow(1-p,3);
+const spring = p => p>=1?1:1-Math.pow(2,-9*p)*Math.cos(p*Math.PI*2.4);
+
+/* beat-locked envelopes — used for EQ / dots only. The bar itself never scales. */
+const beatPop = t => Math.pow(1 - ((t/BEAT) % 1), 5);
+const barPop  = t => Math.pow(1 - ((t/BAR)  % 1), 6);
+const phrasePop = t => Math.pow(1 - ((t/M(4)) % 1), 24);
+
+/* chapters sit on 4-bar phrases so they lock to the song's 8-bar hypermeter */
+const CH = [
+  { a:M(0),  n:"00", k:"THE BAR",
+    eb:"LUMA BAR / macOS 14+",
+    hl:"一条，长在屏幕最上面。",
+    sub:"原生顶部安全区  ·  摄像头不被遮挡  ·  全屏自动让位" },
+  { a:M(4),  n:"01", k:"MUSIC",
+    eb:"01 — MUSIC",
+    hl:"音乐和歌词，都在这一条里。",
+    sub:"本地音频  ·  网易云歌单  ·  封面 / 进度 / 实时同步歌词" },
+  { a:M(8),  n:"02", k:"TRANSLATE",
+    eb:"02 — 划词翻译",
+    hl:"选中，连按两下 Command+C，它就翻好了。",
+    sub:"划词翻译  ·  连按两下拷贝才翻译  ·  流式输出到同一条里" }
+  { a:M(12), n:"03", k:"CURSOR",
+    eb:"03 — CURSOR / CODEX",
+    hl:"Cursor 的上下文烧到哪了，这里看。",
+    sub:"上下文窗口用量  ·  任务完成提醒  ·  不经过通知中心" },
+  { a:M(16), n:"04", k:"SYSTEM",
+    eb:"04 — SYSTEM",
+    hl:"系统状态，和一只会吐槽的猫。",
+    sub:"CPU / 内存 / 磁盘 / 电池 / 网络  ·  随天气与前台应用反应" },
+  { a:M(20), n:"05", k:"", eb:"", hl:"", sub:"" }
+];
+
+const hlEl=$("#hl"), subEl=$("#sub"), ebEl=$("#ebt"), ebLn=$("#eyebrow .ln"), chapEl=$("#chap");
+let builtChapter = -1, chars = [];
+function tokenizeHeadline(text){
+  const tokens = [];
+  for (let i = 0; i < text.length; ) {
+    if (text.startsWith("Command+C", i)) {
+      tokens.push("Command+C");
+      i += 9;
+      continue;
+    }
+    if (text.startsWith("⌘C", i)) {
+      tokens.push("⌘C");
+      i += 2;
+      continue;
+    }
+    tokens.push(text[i] === " " ? "\u00a0" : text[i]);
+    i += 1;
+  }
+  return tokens;
+}
+function buildCopy(i){
+  if (builtChapter === i) return;
+  builtChapter = i;
+  const c = CH[i];
+  hlEl.innerHTML = "";
+  chars = tokenizeHeadline(c.hl).map(ch => {
+    const s = document.createElement("span");
+    s.textContent = ch;
+    hlEl.appendChild(s);
+    return s;
+  });
+  subEl.textContent = c.sub;
+  ebEl.textContent = c.eb;
+  chapEl.innerHTML = c.hl ? `<span class="n">${c.n}</span> / ${c.k}` : "";
+}
+
+/* camera: (x,y) in #camera space lands at frame (960, 400).
+   Screen now starts 14px into the lid (y=48 of #camera). Bar is at screen y=3+16. */
+const CAM = [
+  { t:M(0),        s:1.22, x:960, y: 58, e:"io"  },
+  { t:M(2),        s:1.14, x:960, y: 66, e:"lin" },
+  { t:M(4)-B(1),   s:1.20, x:960, y: 64, e:"lin" },
+  { t:M(4)+B(1),   s:1.55, x:960, y: 62, e:"io"  },
+  { t:M(5),        s:1.58, x:960, y: 62, e:"lin" },
+  { t:M(5)+B(2),   s:1.12, x:960, y:220, e:"io"  },
+  { t:M(8)-B(1),   s:1.14, x:960, y:222, e:"lin" },
+  { t:M(8)+B(1),   s:1.10, x:900, y:220, e:"io"  },
+  { t:M(12)-B(1),  s:1.12, x:900, y:222, e:"lin" },
+  { t:M(12)+B(1),  s:1.35, x:960, y:150, e:"io"  },
+  { t:M(16)-B(1),  s:1.38, x:960, y:152, e:"lin" },
+  { t:M(16)+B(1),  s:1.10, x:960, y:220, e:"io"  },
+  { t:M(20)-B(1),  s:1.12, x:960, y:222, e:"lin" },
+  { t:M(20)+B(1),  s:1.22, x:960, y:180, e:"io"  },
+  { t:DUR,         s:1.34, x:960, y:176, e:"lin" }
+];
+
+/* 14" MBP compact = left 148 + notch 185 + right 134 */
+const BARW = [
+  { t:M(0),       w:0,   e:"io"  },
+  { t:M(0)+B(1),  w:0,   e:"lin" },
+  { t:M(1)+B(1),  w:500, e:"io"  },
+  { t:M(20)-B(1), w:500, e:"lin" },
+  { t:M(20),      w:0,   e:"io"  }
+];
+
+function track(list, t, key){
+  let i = 0;
+  while (i < list.length-1 && t >= list[i+1].t) i++;
+  const a = list[i], b = list[Math.min(i+1, list.length-1)];
+  let p = b.t > a.t ? cl((t-a.t)/(b.t-a.t)) : 1;
+  p = b.e === "lin" ? p : ioCubic(p);
+  return key ? lerp(a[key], b[key], p) : { a, b, p };
+}
+
+const camEl = $("#camera"), gridEl = $("#grid");
+function camera(t){
+  const { a, b, p } = track(CAM, t);
+  const s = lerp(a.s,b.s,p);
+  const x = lerp(a.x,b.x,p), y = lerp(a.y,b.y,p);
+  camEl.style.transform =
+    `translate3d(${(960-x*s).toFixed(3)}px,${(400-y*s).toFixed(3)}px,0) scale(${s.toFixed(5)})`;
+  gridEl.style.transform = `translate3d(${(-(x-960)*0.05).toFixed(2)}px,${(-(y-380)*0.05).toFixed(2)}px,0)`;
+}
+
+/* ===== sprite preload ===== */
+const sprite = $("#sprite");
+const catFrames = [];
+for (let i=0;i<11;i++){
+  const im = document.createElement("img");
+  im.src = `assets/cat/pixel-cat-${String(i).padStart(2,"0")}.png`;
+  sprite.appendChild(im);
+  catFrames.push(im);
+}
+/* Same hold lengths as PixelCatCompanion in the app — not a 9fps flipbook. */
+const CAT_IDLE = [
+  [1,0.78],[3,0.16],[6,0.16],[8,0.72],[7,0.13],[4,0.24],
+  [7,0.13],[8,0.68],[6,0.16],[2,0.56],[6,0.16],[3,0.16],
+  [0,0.42],[4,0.30],[1,0.86],[7,0.14],[10,0.58],[7,0.16],[1,1.08]
+];
+const CAT_IDLE_DUR = CAT_IDLE.reduce((s,x)=>s+x[1],0);
+const CAT_WALK = [3,6,8,6];
+function catIdleFrame(elapsed){
+  let phase = ((elapsed % CAT_IDLE_DUR) + CAT_IDLE_DUR) % CAT_IDLE_DUR;
+  for (const [f,d] of CAT_IDLE){
+    if (phase < d) return f;
+    phase -= d;
+  }
+  return 1;
+}
+
+/* ===== streaming translation ===== */
+const ZH = "ICML 2026 没有任何官方卫星会议、卫星学术会议或附属卫星活动，除非本网站明确列出。任何自称「ICML 卫星活动」或使用类似表述的活动，均非由 ICML 2026 组织、认可或赞助。";
+const atp = $("#atp");
+const zhChars = [...ZH].map(ch => {
+  const s = document.createElement("span");
+  s.textContent = ch;
+  atp.appendChild(s);
+  return s;
+});
+const caret = document.createElement("i");
+caret.id = "acaret";
+atp.appendChild(caret);
+
+const el = {
+  screen:$("#screen"), wall:$("#wall"), walldim:$("#walldim"), bar:$("#bar"),
+  lid:$("#lid"), menubar:$("#menubar"), wingL:$("#wingL"), wingR:$("#wingR"),
+  blefts:$$(".bleft"), brights:$$(".bright"),
+  bc:{ music:$("#cMusic"), agent:$("#cAgent"), cursor:$("#cCursor"), system:$("#cSystem") },
+  bcover:$("#bcover"), bringarc:$("#bringarc"), bplay:$("#bplay"), bripple:$("#bripple"),
+  bprog:$("#bprog"),
+  bastat:$("#bastat"), bcctx:$("#bcctx"), bpct:$("#bpct"),
+  pM:$("#panelM"), pA:$("#panelA"), pC:$("#panelC"), pS:$("#panelS"),
+  mtrack:$("#mtrack b"), tcur:$("#tcur"), ptb:$("#ptb"),
+  lyr:$$("#lyr p[data-l]"), rows:$$("#list .lrow"),
+  astatus:$("#astatus"), ameta2:$("#ameta2"),
+  cbadge:$("#cbadge"), cbig:$("#cbig"), cleft:$("#cleft"), cctx:$("#cctx"), cbar:$("#cbar b"),
+  stats:$$("#panelS .stat"), bars:$$("#panelS .sb b"), cnts:$$("#panelS .sv"),
+  sel:$("#sel"), selhi:$("#selhi"), key:$("#key"),
+  pet:$("#pet"), bub:$("#bub"),
+  hair:$("#hair"), scrim:$("#scrim"), eyebrow:$("#eyebrow"), flash:$("#flash"),
+  dots:$$("#beatdots i"),
+  fin:$("#fin"), finIcon:$("#fin img"), wm:$("#wm"),
+  fmeta:$("#fmeta"), fbadge:$("#fbadge"), fcredit:$("#fcredit"), glow:$("#glow")
+};
+
+function fadeSlide(node, p, dy, blur){
+  node.style.opacity = p;
+  node.style.transform = `translate3d(0,${((1-p)*dy).toFixed(2)}px,0)`;
+  if (blur !== undefined) node.style.filter = p < 1 ? `blur(${((1-p)*blur).toFixed(2)}px)` : "none";
+}
+const mmss = s => `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,"0")}`;
+function setGlyph(node, paused){
+  const want = paused ? "\u275a\u275a" : "\u25b6";
+  if (node.textContent !== want) node.textContent = want;
+}
+function panelTransform(inP, outP){
+  const sy = lerp(0.46, 1, inP*outP);
+  const sx = lerp(0.86, 1, cl(inP*1.35)*outP);
+  return `translate3d(-50%,${((1-inP)*-14).toFixed(2)}px,0) scaleX(${sx.toFixed(4)}) scaleY(${sy.toFixed(4)})`;
+}
+
+/* ===== seek ===== */
+function seek(t){
+  t = cl(t, 0, DUR);
+
+  let ci = 0;
+  for (let i=0;i<CH.length;i++) if (t >= CH[i].a) ci = i;
+  buildCopy(ci);
+  const c = CH[ci];
+  const nextA = CH[ci+1] ? CH[ci+1].a : DUR;
+
+  camera(t);
+  el.hair.style.transform = `scaleX(${(t/DUR).toFixed(5)})`;
+
+  /* four dots count the bar, so the cut reads as music even without sound */
+  const beatInBar = Math.floor((t/BEAT) % 4);
+  el.dots.forEach((d,i) => {
+    const hot = i === beatInBar ? 1 : 0;
+    d.style.background = hot ? "#D9552B" : "#4A423A";
+    d.style.transform = `scale(${(1 + hot*0.45*beatPop(t)).toFixed(3)})`;
+  });
+  el.flash.style.opacity = (0.04 * phrasePop(t)).toFixed(4);
+
+  const endFade = 1 - ioCubic(pr(t, DUR-B(2), B(2)));
+  el.lid.style.filter = "none";
+  el.lid.style.transform = "none";
+  el.wall.style.opacity = 1;
+  el.menubar.style.opacity = 1;
+  el.screen.style.opacity = endFade;
+  el.screen.style.transform = "none";
+  el.wall.style.filter = `hue-rotate(${(Math.sin(t*0.16)*7).toFixed(2)}deg)`;
+  el.blefts.forEach(n => { n.style.transform = "none"; n.style.filter = "none"; });
+  el.brights.forEach(n => { n.style.transform = "none"; n.style.filter = "none"; });
+  if (el.wingL) el.wingL.style.opacity = 0;
+  if (el.wingR) el.wingR.style.opacity = 0;
+
+  /* ---- the bar: width only. never scale — that was the bounce. ---- */
+  const bw = track(BARW, t, "w");
+  el.bar.style.width = `${bw.toFixed(2)}px`;
+  el.bar.style.opacity = bw > 2 ? 1 : 0;
+  el.bar.style.transform = "translateX(-50%)";
+  el.bar.style.overflow = "hidden";
+
+  const fMusic  = cl(pr(t,M(1)-B(0.5),B(1))) * (1-cl(pr(t,M(8)-B(1),B(0.8))));
+  const fAgent  = cl(pr(t,M(8),B(1)))        * (1-cl(pr(t,M(12)-B(1),B(0.8))));
+  const fCursor = cl(pr(t,M(12),B(1)))       * (1-cl(pr(t,M(16)-B(1),B(0.8))));
+  const fSystem = cl(pr(t,M(16),B(1)))       * (1-cl(pr(t,M(20)-B(1),B(0.8))));
+  el.bc.music.style.opacity  = fMusic;
+  el.bc.agent.style.opacity  = fAgent;
+  el.bc.cursor.style.opacity = fCursor;
+  el.bc.system.style.opacity = fSystem;
+  el.bprog.style.opacity = fMusic;
+
+  /* ---- 01 music ---- */
+  const playFrom = M(4)+B(2);
+  const songT = Math.min(SONG_DUR, AUDIO_AT + t);
+  const songP = songT / SONG_DUR;
+  el.mtrack.style.transform = `scaleX(${songP.toFixed(5)})`;
+  el.tcur.textContent = mmss(songT);
+  if (el.bringarc) el.bringarc.style.strokeDashoffset = (56.55 * (1 - songP)).toFixed(2);
+
+  const press = pr(t, playFrom-B(0.35), B(0.35));
+  const rel = pr(t, playFrom, B(0.6));
+  el.bplay.style.transform = `scale(${(1-0.16*press+0.16*rel).toFixed(4)})`;
+  const rp = pr(t, playFrom, B(1.2));
+  el.bripple.style.opacity = rp>0 && rp<1 ? (1-rp)*0.9 : 0;
+  el.bripple.style.transform = `scale(${lerp(1,2.3,outCubic(rp)).toFixed(3)})`;
+  setGlyph(el.bplay, t>playFrom); setGlyph(el.ptb, t>playFrom);
+
+  const mIn = spring(pr(t,M(5)+B(2),B(1.7))), mOut = 1-inExpo(pr(t,M(8)-B(1.2),B(1)));
+  const mOn = (t>=M(5)+B(2) && t<M(8)-B(0.2)) ? mIn*mOut : 0;
+  el.pM.style.opacity = cl(mOn*2.2);
+  el.pM.style.transform = panelTransform(mIn, mOut);
+  const lyr0 = lrcIndex(AUDIO_AT + M(5)+B(2));
+  const lyrCur = lrcIndex(songT);
+  el.lyr.forEach((p,i) => {
+    const row = LRC[lyr0 + i];
+    const text = row ? row[1] : "";
+    if (p.textContent !== text) p.textContent = text;
+    const on = !!row && (lyr0 + i) === lyrCur;
+    p.classList.toggle("on", on);
+    const ap = cl(pr(t, M(5)+B(2.4)+i*0.08, B(0.9)));
+    p.style.opacity = (on?1:0.55)*ap;
+    p.style.transform = `translate3d(0,${((1-ap)*10).toFixed(2)}px,0)`;
+  });
+  el.rows.forEach((r,i) => {
+    const ap = outCubic(pr(t, M(5)+B(2.5)+i*0.09, B(1)));
+    r.style.opacity = ap;
+    r.style.transform = `translate3d(${((1-ap)*22).toFixed(2)}px,0,0)`;
+  });
+
+  /* ---- 02 translate ---- */
+  const selIn = spring(pr(t,M(8)+B(0.5),B(1.2)));
+  const selOut = 1-ioCubic(pr(t,M(12)-B(1.2),B(0.9)));
+  const selOn = (t>=M(8)+B(0.5) && t<M(12)-B(0.2)) ? selIn*selOut : 0;
+  el.sel.style.opacity = cl(selOn*2);
+  el.sel.style.transform =
+    `translate3d(${((1-selIn)*-30).toFixed(2)}px,0,0) scale(${lerp(0.9,1,selIn*selOut).toFixed(4)})`;
+  el.selhi.style.left = "0px"; el.selhi.style.top = "3px";
+  el.selhi.style.width = "318px"; el.selhi.style.height = "110px";
+  el.selhi.style.transform = `scaleX(${outCubic(pr(t,M(8)+B(2),B(1.4))).toFixed(4)})`;
+
+  const keyIn = spring(pr(t,M(8)+B(2),B(1))), keyOut = 1-ioCubic(pr(t,M(9)+B(2),B(0.8)));
+  const keyOn = (t>=M(8)+B(2) && t<M(10)) ? keyIn*keyOut : 0;
+  el.key.style.opacity = cl(keyOn*2);
+  el.key.style.transform =
+    `translate3d(0,${((1-keyIn)*14).toFixed(2)}px,0) scale(${lerp(0.8,1,keyIn*keyOut).toFixed(4)})`;
+
+  const aIn = spring(pr(t,M(9),B(1.5))), aOut = 1-inExpo(pr(t,M(12)-B(1.2),B(1)));
+  const aOn = (t>=M(9) && t<M(12)-B(0.2)) ? aIn*aOut : 0;
+  el.pA.style.opacity = cl(aOn*2.2);
+  el.pA.style.transform = panelTransform(aIn, aOut);
+  const translating = t > M(9)+B(2);
+  const st = translating ? "Translating" : "Reading selection";
+  if (el.astatus.textContent !== st) el.astatus.textContent = st;
+  if (el.bastat.textContent !== st) el.bastat.textContent = st;
+  el.ameta2.style.opacity = translating ? 1 : 0.35;
+
+  const typed = Math.floor(cl(pr(t,M(9)+B(2),M(2))) * zhChars.length);
+  zhChars.forEach((s,i) => { s.style.display = i < typed ? "inline" : "none"; });
+  if (typed > 0) zhChars[typed - 1].after(caret);
+  else atp.insertBefore(caret, atp.firstChild);
+  caret.style.opacity = (t>M(9)+B(2) && t<M(11.6) && ((t/BEAT)%1) < 0.5) ? 1 : 0;
+
+  /* ---- 03 cursor ---- */
+  const ringP = outCubic(pr(t,M(12)+B(1),M(2))) * 0.98;
+  const kUsed = Math.round(ringP*200);
+  el.bcctx.textContent = `${kUsed}K / 200K`;
+  el.bpct.textContent = `${Math.round(ringP*100)}%`;
+  el.cctx.textContent = `Current context \u2022 ${kUsed}K / 200K`;
+  el.cbig.textContent = `${Math.round(ringP*100)}%`;
+  el.cleft.textContent = `${200-kUsed}K LEFT`;
+  el.cbar.style.transform = `scaleX(${ringP.toFixed(5)})`;
+
+  const cIn = spring(pr(t,M(12)+B(1),B(1.7))), cOut = 1-inExpo(pr(t,M(16)-B(1.2),B(1)));
+  const cOn = (t>=M(12)+B(1) && t<M(16)-B(0.2)) ? cIn*cOut : 0;
+  el.pC.style.opacity = cl(cOn*2.2);
+  el.pC.style.transform = panelTransform(cIn, cOut);
+
+  /* ---- 04 system ---- */
+  const yIn = spring(pr(t,M(16)+B(1),B(1.7))), yOut = 1-inExpo(pr(t,M(20)-B(1.2),B(1)));
+  const yOn = (t>=M(16)+B(1) && t<M(20)-B(0.2)) ? yIn*yOut : 0;
+  el.pS.style.opacity = cl(yOn*2.2);
+  el.pS.style.transform = panelTransform(yIn, yOut);
+  el.stats.forEach((s,i) => {
+    const ap = outCubic(pr(t, M(16)+B(1.4)+i*0.09, B(1)));
+    s.style.opacity = ap;
+    s.style.transform = `translate3d(0,${((1-ap)*16).toFixed(2)}px,0)`;
+  });
+  el.bars.forEach((b,i) => {
+    b.style.transform =
+      `scaleX(${(parseFloat(b.dataset.w)*outCubic(pr(t, M(16)+B(1.6)+i*0.09, B(1.8)))).toFixed(4)})`;
+  });
+  el.cnts.forEach((v,i) => {
+    v.textContent = `${Math.round((+v.dataset.cnt)*outCubic(pr(t, M(16)+B(1.5)+i*0.09, B(1.9))))}%`;
+  });
+
+  const walk = cl(pr(t,M(17),M(1.4)));
+  const petOn = cl(pr(t,M(17)-B(0.2),B(0.8))) * (1-cl(pr(t,M(20)-B(1.2),B(0.9))));
+  el.pet.style.opacity = petOn;
+  const wx = lerp(170, 260, outCubic(walk));
+  const hop = walk<1
+    ? Math.abs(Math.sin(t * Math.PI * 2 / 0.64)) * -3
+    : Math.sin(t * Math.PI * 2 / 2.2) * 2;
+  el.pet.style.transform = `translate3d(${wx.toFixed(1)}px,${(220+hop).toFixed(1)}px,0)`;
+  const fi = walk<1
+    ? CAT_WALK[Math.floor(t / 0.32) % CAT_WALK.length]
+    : catIdleFrame(t);
+  catFrames.forEach((im,i) => { im.style.opacity = i===fi ? 1 : 0; });
+  const bIn = spring(pr(t,M(18)+B(2),B(1.3))), bOut = 1-ioCubic(pr(t,M(20)-B(1.2),B(0.8)));
+  const bOn = (t>=M(18)+B(2) && t<M(20)-B(0.2)) ? bIn*bOut : 0;
+  el.bub.style.opacity = cl(bOn*2);
+  el.bub.style.transform = `scale(${lerp(0.6,1,bIn*bOut).toFixed(4)})`;
+
+  /* ---- copy ---- */
+  const inAt = ci===0 ? M(1) : c.a + B(1);
+  const outAt = nextA - B(1.5);
+  const goneE = ioCubic(cl(pr(t,outAt,B(1.2))));
+  const live = ci < 5 ? 1 : 0;
+
+  const ebP = outCubic(pr(t,inAt-B(0.5),B(1)));
+  ebLn.style.transform = `scaleX(${ebP.toFixed(4)})`;
+  el.eyebrow.style.opacity = ebP*(1-goneE)*live;
+  el.eyebrow.style.transform = `translate3d(0,${(goneE*-26).toFixed(2)}px,0)`;
+
+  chars.forEach((s,i) => {
+    const p = outExpo(pr(t, inAt + i*(BEAT/14), B(1.3)));
+    s.style.opacity = p*(1-goneE)*live;
+    s.style.transform = `translate3d(0,${((1-p)*44 + goneE*-40).toFixed(2)}px,0)`;
+    s.style.filter = p<1 ? `blur(${((1-p)*7).toFixed(2)}px)`
+                         : (goneE>0 ? `blur(${(goneE*6).toFixed(2)}px)` : "none");
+  });
+
+  const sP = outCubic(pr(t, inAt+B(0.6), B(1.3)));
+  subEl.style.opacity = sP*(1-goneE)*0.95*live;
+  subEl.style.transform = `translate3d(0,${((1-sP)*18 + goneE*-22).toFixed(2)}px,0)`;
+
+  const chP = outCubic(pr(t, inAt-B(0.3), B(1)));
+  chapEl.style.opacity = chP*(1-goneE)*live;
+  chapEl.style.transform = `translate3d(${((1-chP)*18).toFixed(2)}px,0,0)`;
+
+  /* ---- 05 finale ---- */
+  const dim = ioCubic(pr(t,M(20)-B(0.5),B(2.5)));
+  el.walldim.style.opacity = (dim*0.93).toFixed(4);
+  el.scrim.style.opacity = (1-dim*0.55).toFixed(4);
+  el.dots.forEach(d => { d.style.opacity = (1-dim).toFixed(3); });
+
+  el.fin.style.opacity = cl(pr(t,M(20)+B(1),B(1.2))) * (1-cl(pr(t,DUR-B(2.4),B(1.2))));
+  const icoP = spring(pr(t,M(20)+B(1),B(2)));
+  el.finIcon.style.opacity = cl(pr(t,M(20)+B(1),B(1.6)));
+  el.finIcon.style.transform =
+    `translate3d(0,${((1-icoP)*72).toFixed(2)}px,0) scale(${lerp(0.72,1,icoP).toFixed(4)})`;
+  el.glow.style.opacity = outCubic(pr(t,M(20)+B(1.4),M(1)));
+  fadeSlide(el.wm, outExpo(pr(t,M(21),B(2))), 40, 10);
+  fadeSlide(el.fmeta, outCubic(pr(t,M(21)+B(2),B(1.5))), 24);
+  fadeSlide(el.fbadge, outCubic(pr(t,M(22),B(1.5))), 20);
+  fadeSlide(el.fcredit, outCubic(pr(t,M(22)+B(1.2),B(1.3))), 16);
+  el.hair.style.opacity = t > DUR-B(2.4) ? (0.85*(1-pr(t,DUR-B(2.4),B(2)))).toFixed(3) : 0.85;
+}
+
+window.__seek = seek;
+window.__duration = DUR;
+window.__bpm = BPM;
+window.__audioStart = AUDIO_AT; // song bar 8 = first 8-bar phrase after the intro, 128 BPM grid
+
+const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+seek(0);
+
+if (!reduce && !location.search.includes("static")) {
+  let t0 = null;
+  const loop = ts => {
+    if (t0 === null) t0 = ts;
+    seek(((ts - t0)/1000) % DUR);
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+} else {
+  seek(M(22)+B(2));
+}
+
+function fit(){
+  const s = Math.min(innerWidth/1920, innerHeight/1080);
+  $("#frame").style.transform = s < 0.999 ? `scale(${s})` : "none";
+}
+addEventListener("resize", fit); fit();
+})();
+</script>
+</body>
+</html>

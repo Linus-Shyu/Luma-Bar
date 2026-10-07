@@ -1,0 +1,12 @@
+{
+  "name": "luma-bar-promo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preview": "node -e \"import('node:http').then(async h=>{const{default:fs}=await import('node:fs');const p=await import('node:path');const d=process.cwd();h.createServer((q,s)=>{const f=p.join(d,decodeURIComponent(q.url.split('?')[0]).replace(/^\\/+/,'')||'luma-bar-promo.html');if(!fs.existsSync(f))return s.writeHead(404).end();const m={'.html':'text/html; charset=utf-8','.png':'image/png','.otf':'font/otf'}[p.extname(f)]||'application/octet-stream';s.writeHead(200,{'content-type':m});fs.createReadStream(f).pipe(s)}).listen(8731,()=>console.log('http://127.0.0.1:8731/luma-bar-promo.html'))})\"",
+    "render": "node render.mjs"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.0.0"
+  }
+}

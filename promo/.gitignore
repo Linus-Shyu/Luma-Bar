@@ -1,0 +1,9 @@
+node_modules/
+package-lock.json
+check/
+mix-*.mp4
+luma-bar-promo-4k.mp4
+assets/track.mp3
+assets/cover.png
+assets/cover-ive.png
+assets/cover-nj.png
