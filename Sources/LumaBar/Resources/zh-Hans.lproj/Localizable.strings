@@ -104,12 +104,17 @@
 "permission.accessibility.subtitle" = "划词翻译、Agent 读取选区与前台 App 上下文";
 "permission.automation.title" = "自动化控制";
 "permission.automation.subtitle" = "通过 AppleScript 同步 Apple Music / 网易云播放状态";
+"permission.automation.subtitle.store" = "用来控制「音乐」App。网易云不使用这项权限。";
+"help.shortcut.translate.detail.store" = "开启后，连按两下 Command+C：第一次只复制，第二次才翻译。普通复制不受影响。";
+"help.feature.music.detail.store" = "同步 Apple Music 和网易云。展开后可看歌词；Apple Music 和本地歌曲会显示进度条。";
 "permission.screen.title" = "屏幕录制";
 "permission.screen.subtitle" = "截图分析当前窗口（可选，可稍后开启）";
 "permission.state.pending" = "待授权";
 "permission.state.requesting" = "请求中…";
 "permission.state.done" = "已完成";
 "permission.state.off" = "未开启";
+"permission.state.not_applied" = "已打开，需重新打开应用后生效";
+"permission.accessibility.relaunch_hint" = "系统设置里如果已经打开，重新打开 Luma Bar 后这里会显示已完成。";
 "permission.state.restricted" = "受限制";
 "permission.state.skipped" = "已跳过";
 "permission.guide.accessibility.1" = "点击「授权」或「打开系统设置」";
@@ -270,6 +275,7 @@
 "island.music.pause" = "暂停";
 "island.music.seek" = "跳转";
 "island.music.no_timeline" = "暂无时间轴";
+"island.music.netease_no_seek" = "这个版本无法调整网易云客户端的进度；下载这首歌后就能拖动。";
 "island.music.prev_playlist" = "上一歌单";
 "island.music.next_playlist" = "下一歌单";
 "island.music.open_player" = "打开播放器";
@@ -290,3 +296,9 @@
 "island.library.local_file" = "本地文件";
 "agent.configure_key_format" = "请配置 %@ API Key，或注入内置密钥。";
 "agent.configure_key_first_format" = "请先配置 %@ API Key，或在构建时注入内置密钥。";
+"menu.selection_translation" = "划词翻译";
+"translate.consent.title" = "开启划词翻译？";
+"translate.consent.body" = "开启后，你对同一段文字连按两次 ⌘C 时，Luma Bar 会把这段文字发送给 AI 服务（DeepSeek；如果你选了 OpenAI 则是 OpenAI）进行翻译。功能关闭时不会发送任何内容，你随时可以在菜单里关掉它。";
+"translate.consent.allow" = "开启";
+"translate.consent.decline" = "暂不开启";
+"permission.guide.automation.2.store" = "或打开「隐私与安全性 → 自动化」，允许控制 Music";

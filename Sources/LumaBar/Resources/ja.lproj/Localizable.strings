@@ -270,6 +270,7 @@
 "island.music.pause" = "一時停止";
 "island.music.seek" = "シーク";
 "island.music.no_timeline" = "タイムラインなし";
+"island.music.netease_no_seek" = "このバージョンでは NetEase Cloud Music の再生位置を動かせません。この曲をダウンロードするとドラッグできます。";
 "island.music.prev_playlist" = "前のプレイリスト";
 "island.music.next_playlist" = "次のプレイリスト";
 "island.music.open_player" = "プレーヤーを開く";
@@ -290,3 +291,9 @@
 "island.library.local_file" = "ローカルファイル";
 "agent.configure_key_format" = "%@ の APIキーを設定するか、内蔵キーを注入してください。";
 "agent.configure_key_first_format" = "先に %@ の APIキーを設定するか、ビルド時に内蔵キーを注入してください。";
+"menu.selection_translation" = "選択テキストを翻訳";
+"translate.consent.title" = "翻訳をオンにしますか？";
+"translate.consent.body" = "同じテキストを ⌘C で 2 回コピーすると、Luma Bar はそのテキストを AI サービス（DeepSeek、または選択した場合は OpenAI）に送信して翻訳します。この機能がオフの間は何も送信されず、メニューからいつでもオフにできます。";
+"translate.consent.allow" = "オンにする";
+"translate.consent.decline" = "今はしない";
+"permission.guide.automation.2.store" = "またはオートメーションで Music を許可";

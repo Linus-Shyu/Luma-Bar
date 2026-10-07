@@ -18,6 +18,14 @@ struct HelpFeatureItem: Identifiable, Equatable {
 }
 
 enum HelpGuideContent {
+    static var translateShortcutKeys: [String] {
+        #if LUMA_APP_STORE
+        ["⌘", "C", "×2"]
+        #else
+        ["⌥"]
+        #endif
+    }
+
     static var shortcuts: [HelpShortcutItem] {
         [
             HelpShortcutItem(
@@ -46,7 +54,7 @@ enum HelpGuideContent {
             ),
             HelpShortcutItem(
                 id: "translate",
-                keys: ["⌥"],
+                keys: translateShortcutKeys,
                 title: LumaBarL10n.helpTranslateTitle,
                 detail: LumaBarL10n.helpTranslateDetail
             ),

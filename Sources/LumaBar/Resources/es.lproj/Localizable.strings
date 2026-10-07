@@ -270,6 +270,7 @@
 "island.music.pause" = "Pausa";
 "island.music.seek" = "Seek";
 "island.music.no_timeline" = "No timeline available";
+"island.music.netease_no_seek" = "This version cannot move NetEase Cloud Music's playhead. Download this song to drag the bar.";
 "island.music.prev_playlist" = "Previous playlist";
 "island.music.next_playlist" = "Next playlist";
 "island.music.open_player" = "Abrir reproductor";
@@ -290,3 +291,9 @@
 "island.library.local_file" = "Archivo local";
 "agent.configure_key_format" = "Configura una clave API de %@ o inyecta una clave integrada.";
 "agent.configure_key_first_format" = "Configura primero una clave API de %@ o inyecta una clave integrada al compilar.";
+"menu.selection_translation" = "Traducir selección";
+"translate.consent.title" = "¿Activar la traducción?";
+"translate.consent.body" = "Cuando copias el mismo texto dos veces con Comando-C, Luma Bar envía ese texto a un servicio de IA (DeepSeek, u OpenAI si lo elegiste) para traducirlo. No se envía nada mientras esta función esté desactivada, y puedes desactivarla en el menú en cualquier momento.";
+"translate.consent.allow" = "Activar";
+"translate.consent.decline" = "Ahora no";
+"permission.guide.automation.2.store" = "O abre Automatización y permite Music";

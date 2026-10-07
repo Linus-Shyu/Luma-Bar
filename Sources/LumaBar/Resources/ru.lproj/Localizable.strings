@@ -270,6 +270,7 @@
 "island.music.pause" = "Пауза";
 "island.music.seek" = "Seek";
 "island.music.no_timeline" = "No timeline available";
+"island.music.netease_no_seek" = "This version cannot move NetEase Cloud Music's playhead. Download this song to drag the bar.";
 "island.music.prev_playlist" = "Previous playlist";
 "island.music.next_playlist" = "Next playlist";
 "island.music.open_player" = "Открыть плеер";
@@ -290,3 +291,9 @@
 "island.library.local_file" = "Локальный файл";
 "agent.configure_key_format" = "Настройте API-ключ %@ или внедрите встроенный ключ.";
 "agent.configure_key_first_format" = "Сначала настройте API-ключ %@ или внедрите встроенный ключ при сборке.";
+"menu.selection_translation" = "Перевод выделенного";
+"translate.consent.title" = "Включить перевод?";
+"translate.consent.body" = "Когда вы дважды копируете один и тот же текст сочетанием Command-C, Luma Bar отправляет этот текст в ИИ-сервис (DeepSeek или OpenAI, если вы его выбрали) для перевода. Пока функция выключена, ничего не отправляется; её можно выключить в меню в любой момент.";
+"translate.consent.allow" = "Включить";
+"translate.consent.decline" = "Не сейчас";
+"permission.guide.automation.2.store" = "Или откройте Автоматизацию и разрешите Music";

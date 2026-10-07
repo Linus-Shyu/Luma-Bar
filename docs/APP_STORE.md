@@ -17,10 +17,23 @@
 
 - **无**任意 `zsh`；仅 `open -a/-b`、URL、剪贴板、Shortcuts。
 - **无**私有 `MediaRemote`（Archive 有符号守卫，命中即失败）。
+- **无** `System Events` / UI 脚本；Apple Events 目标只有 `com.apple.Music` 和用户主动发信息时的 `com.apple.MobileSMS`。网易云没有脚本字典，商店包不向它发任何 Apple Event，也不申请对应例外。
+- 屏幕录制只在用户要求截图分析时申请（ScreenCaptureKit）。通讯录只在用户要求按姓名发信息时申请。
 - Cursor / Codex 监控需用户在菜单 **Agent → Data Access** 授权文件夹。
-- 辅助功能 / 屏幕录制仍按系统弹窗授权。
+- 商店版不申请辅助功能。划词翻译默认关闭，用户在状态栏菜单「划词翻译」里打开，第一次会弹窗说明复制的文字会发给 AI 服务（DeepSeek 或用户选的 OpenAI），点「开启」才生效；开启后连按两下 ⌘C 触发（第一次只复制，第二次才翻译）。全屏判断用公开的窗口列表。
+- 像素宠物（PixelCat / PixelDog / PixelPanda）由 Xcode 脚本阶段拷入 `Resources/`，与字体同一阶段。
 
-当前商店版 **网易云控制是 stub**。商店描述里不要写「完整控制网易云」，否则必拒。
+商店版网易云只走审核允许的公开能力：
+
+- **播放 / 暂停**：公开 `orpheus://`（`{"cmd":"resume"}`，暂停同时发 `{"cmd":"pause"}` 和 `{"cmd":"pausePlayer"}`）。不需要 entitlement，也不会抢焦点。
+- **点歌 / 上一首 / 下一首**：同一条公开命令 `{"cmd":"play","type":"song","id":"<数字id>"}`（键顺序不能变）。
+- **歌单 / 正在播放**：用户用系统打开面板授权网易云 storage 文件夹后，只读其中的 SQLite；封面和歌词走 `music.163.com` 的公开 HTTP 接口。不静默探测其他 App 的容器或 Cookie。
+- **已下载的普通音频**（mp3 / m4a / flac …）：用户再授权音乐文件夹后，由 Luma Bar 自己解码播放，进度条、拖动、逐行歌词都可用。加密的 `.ncm` 容器不解、不碰，仍交给网易云客户端。
+- **网易云自己在播的歌**没有公开进度接口：商店版按开始时间估算，估算可信时画只读进度条，不可信时隐藏；歌词同样只在可信时高亮。拖动只对已下载的普通音频生效：Luma Bar 暂停网易云，用自己的播放器从拖到的位置接着放。
+
+商店描述里不要写「完整控制网易云」或「灵动岛」。
+
+Info.plist 已声明 `ITSAppUsesNonExemptEncryption = false`（只用 HTTPS，属豁免），Connect 上传后不再追问出口合规。
 
 ---
 
@@ -32,7 +45,7 @@
    - **Apple Distribution** / Mac App Distribution（签 .app）
    - **Mac Installer Distribution**（Xcode 上传 pkg 时用）
 4. **定价**：付费单包，选价格档。
-5. 填写：隐私政策 URL（必须可打开，草稿见 [`PRIVACY_POLICY_STUB.md`](PRIVACY_POLICY_STUB.md)）、截图、描述、分类（Utilities / Productivity）。
+5. 填写：隐私政策 URL **https://linusshyu.dev/privacy/**（草稿见 [`PRIVACY_POLICY_STUB.md`](PRIVACY_POLICY_STUB.md)）、截图、描述、分类（Utilities / Productivity）。
 6. 银行与税务、出口合规、年龄分级、隐私营养标签。
 7. 提交审核时粘贴 [`APP_REVIEW_NOTES.md`](APP_REVIEW_NOTES.md)。
 
@@ -72,8 +85,15 @@ Archive 产物里应满足：
 ```bash
 APP="dist/LumaBar.xcarchive/Products/Applications/luma bar.app"
 nm -u "$APP/Contents/MacOS/LumaBar" | grep -i MediaRemote   # 必须无输出
-codesign -d --entitlements :- "$APP"                        # 必须有 app-sandbox 和两条 apple-events 例外
+codesign -d --entitlements - --xml "$APP" | plutil -p -      # 必须有 app-sandbox；apple-events 只含 Music、MobileSMS（不应有 NetEase）；
+                                                              # 有 addressbook（仅信息查找）；不应出现 music-library
+plutil -p "$APP/Contents/Info.plist" | grep -E 'Version|Encryption'
+ls "$APP/Contents/Resources" | grep -E 'Pixel(Cat|Dog|Panda)|Fonts'   # 三个宠物目录 + Fonts 都要在
 ```
+
+### 上传前证书
+
+本机只有 **Apple Development** 与 **Developer ID Application** 时，`--upload` / Organizer 分发会要求 **Apple Distribution** + **Mac Installer Distribution**。在 Xcode → Settings → Accounts → Manage Certificates 里点 “+” 创建即可，自动签名会自行选用。
 
 ---
 

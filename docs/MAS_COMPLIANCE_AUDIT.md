@@ -1,5 +1,10 @@
 # Luma Bar — Mac App Store (MAS) 上架全合规评估报告
 
+> **历史文档（基于 v0.3.2 快照）。** 下文列出的阻断项已在 v1.0.0–v1.0.3 逐项处理：
+> `temporary-exception.apple-events` 已补齐、MAS 下不再调用 System Events、通讯录 / 音乐库 entitlement 已移除、
+> Info.plist 版本号与 Xcode 工程同步、像素宠物资源已纳入 Archive。当前状态以 [`APP_STORE.md`](APP_STORE.md)
+> 与 [`APP_REVIEW_NOTES.md`](APP_REVIEW_NOTES.md) 为准；本文仅保留作为审计方法与风险清单的参考。
+
 **评估基准：** Apple《App Store Review Guidelines》（含 2.5 软件要求、5.2.5 知识产权）、macOS App Sandbox 强制规范、Hardened Runtime / Notarization 实务  
 **评估对象：** `/Users/linusshyu/Desktop/luma bar`（含 `Sources/LumaBar/**`、`Support/*`、`build_app*.sh`、`Package.swift`、`docs/*`）  
 **评估视角：** 苛刻审核员 + 自动化静态扫描（私有 API / entitlements / 沙盒越界）  
@@ -143,14 +148,16 @@ final class NetEaseBridge: ...
 | 用途 | 位置 | MAS |
 |------|------|-----|
 | 亮度键模拟 | `sendBrightnessKey` ~L16192 | `#if LUMA_APP_STORE` 直接拒绝 — **OK** |
-| Cmd+C 复制选区 | 非商店 `AgentContextProvider.copySelectedText` | 商店 stub `completion(nil)` — **OK** |
+| Cmd+C 复制选区 | `AgentContextProvider.copySelectedText` | 挂 `allowsAccessibilityFeatures`，商店直接 `completion(nil)`，release 下整段被 DCE — **OK** |
 
-**判决：** 商店二进制路径下 **无** `NX_KEYTYPE_PLAY` / 全局媒体键；Play/Pause 走 Bundle ID AppleScript。**通过（有条件）。**
+**判决：** 商店二进制 `nm -u` 里没有任何 `CGEvent*` 符号，也没有 `NX_KEYTYPE_PLAY` / 全局媒体键。Apple Music 的 Play/Pause 走按 Bundle ID 定向的 AppleScript，网易云走公开 `orpheus://`。**通过。**
 
 ### 2.3 Accessibility / ScreenCaptureKit
 
-- 商店 `AgentContextProvider` 大量 AX 能力已 stub；全屏检测改用 `CGWindowListCopyWindowInfo`（公开）。
-- `AppStoreDistribution.allowsAccessibilityFeatures = true` 与 stub 并存 —— **文案/菜单勿承诺已 stub 的能力**。
+- `AppStoreDistribution.allowsAccessibilityFeatures = false`，`AgentContextProvider` 的每个跨进程 AX 入口都挂在这个常量上，release 下整段被 DCE 掉：`nm -u` 里 `AXUIElementCopyAttributeValue` 与 `CGEventPost` / `CGEventCreateKeyboardEvent` / `CGEventSourceCreate` 全部为 0。
+- 全屏检测走 `CGWindowListCopyWindowInfo`（公开）；AX 那条只是优化路径，沙盒下返回 nil 后自动降级。
+- 划词翻译读不了别的 App 的选区，所以 `readsSelectionDirectly = false`，触发改成连按两下复制同一段文字（监听 `changeCount`，每次变化只读一次；单次 ⌘C 不翻译，避免和普通复制打架）。实测沙盒内读取另一进程写入的剪贴板文本无弹窗、无拦截，22ms 返回。
+- 实测依据：同一个二进制跑两遍，只差 `com.apple.security.app-sandbox`。沙盒内 `AXIsProcessTrusted()` 仍返回 true，但每个跨进程读取都返回 `kAXErrorCannotComplete`（-25204）。
 - Screen Recording：仅用户触发截图分析；需 `NSScreenCaptureUsageDescription`（已有）。
 
 ### 2.4 本节判决

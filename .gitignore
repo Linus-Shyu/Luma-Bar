@@ -1,5 +1,6 @@
 .DS_Store
 .build/
+.build-appstore/
 work/
 *.app/
 *.xcuserstate
@@ -10,5 +11,4 @@ DerivedData/
 dist/
 Sources/LumaBar/BundledAgentSecrets.swift
 xcuserdata/
-*.xcuserstate
-
+document/

@@ -32,6 +32,13 @@ fi
 APP="$ROOT/luma bar.app"
 SIGN_IDENTITY="${LUMA_BAR_CODESIGN_IDENTITY:-}"
 BUILD_UNIVERSAL="${LUMA_BAR_BUILD_UNIVERSAL:-1}"
+# LUMA_APP_STORE=1 builds the sandboxed store configuration (Package.swift reads the same variable).
+APP_STORE_BUILD="${LUMA_APP_STORE:-0}"
+SCRATCH_ARGS=()
+if [[ "$APP_STORE_BUILD" == "1" ]]; then
+  SCRATCH_ARGS=(--scratch-path "$ROOT/.build-appstore")
+  echo "Building the App Store configuration (sandboxed)"
+fi
 # Ad-hoc (`-`) changes CDHash every build → macOS asks for Accessibility / Screen
 # Recording again. Prefer a stable Developer ID so TCC grants stick.
 ALLOW_ADHOC_SIGN="${LUMA_BAR_ALLOW_ADHOC_SIGN:-0}"
@@ -73,17 +80,22 @@ if [[ "$BUILD_UNIVERSAL" == "1" ]]; then
   ARM64_TRIPLE="arm64-apple-macosx14.0"
   X86_64_TRIPLE="x86_64-apple-macosx14.0"
   # ${arr[@]+"${arr[@]}"} keeps `set -u` happy when the array is empty.
-  swift build -c release --triple "$ARM64_TRIPLE" ${SWIFT_BUILD_FLAGS[@]+"${SWIFT_BUILD_FLAGS[@]}"}
-  swift build -c release --triple "$X86_64_TRIPLE" ${SWIFT_BUILD_FLAGS[@]+"${SWIFT_BUILD_FLAGS[@]}"}
-  ARM64_BIN="$(swift build -c release --triple "$ARM64_TRIPLE" --show-bin-path)/LumaBar"
-  X86_64_BIN="$(swift build -c release --triple "$X86_64_TRIPLE" --show-bin-path)/LumaBar"
+  swift build -c release ${SCRATCH_ARGS[@]+"${SCRATCH_ARGS[@]}"} --triple "$ARM64_TRIPLE" ${SWIFT_BUILD_FLAGS[@]+"${SWIFT_BUILD_FLAGS[@]}"}
+  swift build -c release ${SCRATCH_ARGS[@]+"${SCRATCH_ARGS[@]}"} --triple "$X86_64_TRIPLE" ${SWIFT_BUILD_FLAGS[@]+"${SWIFT_BUILD_FLAGS[@]}"}
+  ARM64_BIN="$(swift build -c release ${SCRATCH_ARGS[@]+"${SCRATCH_ARGS[@]}"} --triple "$ARM64_TRIPLE" --show-bin-path)/LumaBar"
+  X86_64_BIN="$(swift build -c release ${SCRATCH_ARGS[@]+"${SCRATCH_ARGS[@]}"} --triple "$X86_64_TRIPLE" --show-bin-path)/LumaBar"
   /usr/bin/lipo -create "$ARM64_BIN" "$X86_64_BIN" -output "$APP/Contents/MacOS/LumaBar"
 else
-  swift build -c release ${SWIFT_BUILD_FLAGS[@]+"${SWIFT_BUILD_FLAGS[@]}"}
-  cp "$(swift build -c release --show-bin-path)/LumaBar" "$APP/Contents/MacOS/LumaBar"
+  swift build -c release ${SCRATCH_ARGS[@]+"${SCRATCH_ARGS[@]}"} ${SWIFT_BUILD_FLAGS[@]+"${SWIFT_BUILD_FLAGS[@]}"}
+  cp "$(swift build -c release ${SCRATCH_ARGS[@]+"${SCRATCH_ARGS[@]}"} --show-bin-path)/LumaBar" "$APP/Contents/MacOS/LumaBar"
 fi
 
 cp "$ROOT/Support/Info.plist" "$APP/Contents/Info.plist"
+# The shared plist describes the App Store build, which does not use Accessibility.
+# The direct build still reads selected text and drives NetEase's own menus with it.
+if [[ "$APP_STORE_BUILD" != "1" ]]; then
+  /usr/libexec/PlistBuddy -c 'Set :NSAccessibilityUsageDescription Luma Bar uses Accessibility to read text you select and to press play, pause, next, and previous in NetEase Cloud Music.' "$APP/Contents/Info.plist"
+fi
 if [[ -d "$ROOT/Support/zh-Hans.lproj" ]]; then
   mkdir -p "$APP/Contents/Resources/zh-Hans.lproj"
   cp -R "$ROOT/Support/zh-Hans.lproj/." "$APP/Contents/Resources/zh-Hans.lproj/"
@@ -109,9 +121,9 @@ copy_spm_resource_bundle() {
 }
 
 if [[ "$BUILD_UNIVERSAL" == "1" ]]; then
-  copy_spm_resource_bundle "$(swift build -c release --triple "$ARM64_TRIPLE" --show-bin-path)" || true
+  copy_spm_resource_bundle "$(swift build -c release ${SCRATCH_ARGS[@]+"${SCRATCH_ARGS[@]}"} --triple "$ARM64_TRIPLE" --show-bin-path)" || true
 else
-  copy_spm_resource_bundle "$(swift build -c release --show-bin-path)" || true
+  copy_spm_resource_bundle "$(swift build -c release ${SCRATCH_ARGS[@]+"${SCRATCH_ARGS[@]}"} --show-bin-path)" || true
 fi
 
 if [[ -d "$ROOT/Support/Assets" ]]; then
@@ -127,6 +139,9 @@ chmod +x "$APP/Contents/MacOS/LumaBar"
 find "$APP" -name '*.cstemp' -delete 2>/dev/null || true
 echo "Signing with: $SIGN_IDENTITY"
 ENTITLEMENTS="$ROOT/Support/LumaBar.entitlements"
+if [[ "$APP_STORE_BUILD" == "1" ]]; then
+  ENTITLEMENTS="$ROOT/Support/LumaBar.AppStore.entitlements"
+fi
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
   /usr/bin/codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
 elif [[ -f "$ENTITLEMENTS" ]]; then

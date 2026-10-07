@@ -1,10 +1,15 @@
 name: Release (Developer ID + Notarize)
 
-# Push an annotated tag like v0.3.4 / v1.0.0 to publish a notarized build.
+# Tags still publish a notarized direct build when Developer ID secrets exist
+# (the public repo). The private App Store snapshot does not have those secrets;
+# there the notarize job is skipped and the store compile job is the check.
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -18,8 +23,83 @@ env:
   CODESIGN_IDENTITY: ""
 
 jobs:
+  compile-store:
+    name: Compile App Store build
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode (Swift 6)
+        run: |
+          set -euo pipefail
+          echo "Available Xcode apps:"
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+
+          SELECTED=""
+          for candidate in \
+            /Applications/Xcode_16.4.app \
+            /Applications/Xcode_16.3.app \
+            /Applications/Xcode_16.2.app \
+            /Applications/Xcode_16.1.app \
+            /Applications/Xcode_16.0.app \
+            /Applications/Xcode_16.app \
+            /Applications/Xcode.app
+          do
+            if [[ -d "$candidate" ]]; then
+              SELECTED="$candidate"
+              break
+            fi
+          done
+
+          if [[ -z "$SELECTED" ]]; then
+            echo "error: no Xcode 16+ found for Swift 6" >&2
+            exit 1
+          fi
+
+          sudo xcode-select -s "$SELECTED/Contents/Developer"
+          echo "Selected: $SELECTED"
+          xcodebuild -version
+          swift --version
+          swift --version | grep -E 'Swift version 6\.' >/dev/null \
+            || { echo "error: selected toolchain is not Swift 6" >&2; exit 1; }
+
+      - name: Compile sandboxed build
+        run: |
+          set -euo pipefail
+          # The real key file is gitignored. CI uses the empty example, same as build_app_store.sh.
+          if [[ ! -f Sources/LumaBar/BundledAgentSecrets.swift ]]; then
+            cp Support/Templates/BundledAgentSecrets.example.swift Sources/LumaBar/BundledAgentSecrets.swift
+          fi
+          export LUMA_APP_STORE=1
+          swift build -c release -Xswiftc -DLUMA_APP_STORE
+
+  notarize-gate:
+    name: Developer ID secrets
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - name: Skip notarization when this repo has no signing secrets
+        id: check
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$BUILD_CERTIFICATE_BASE64" && -n "$P12_PASSWORD" && -n "$KEYCHAIN_PASSWORD" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "No Developer ID secrets on this repository. Skipping notarized release."
+          fi
+
   release:
     name: Build · Sign · Notarize
+    needs: notarize-gate
+    if: needs.notarize-gate.outputs.enabled == 'true' && startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-15
     timeout-minutes: 90
 

@@ -3081,6 +3081,22 @@
         }
       }
     },
+    "help.shortcut.translate.detail.store": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press Command-C twice: the first copy stays a copy; the second translates (when this feature is on)."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启后，连按两下 Command+C：第一次只复制，第二次才翻译。普通复制不受影响。"
+          }
+        }
+      }
+    },
     "help.shortcut.translate.detail": {
       "localizations": {
         "en": {
@@ -3497,6 +3513,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Музыка и тексты"
+          }
+        }
+      }
+    },
+    "help.feature.music.detail.store": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Apple Music and NetEase. Lyrics show when you expand; the progress bar appears for Apple Music and local files."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步 Apple Music 和网易云。展开后可看歌词；Apple Music 和本地歌曲会显示进度条。"
           }
         }
       }
@@ -7211,6 +7243,22 @@
         }
       }
     },
+    "permission.automation.subtitle.store": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lets Luma Bar control the Music app. NetEase does not use this permission."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用来控制「音乐」App。网易云不使用这项权限。"
+          }
+        }
+      }
+    },
     "permission.automation.subtitle": {
       "localizations": {
         "en": {
@@ -7627,6 +7675,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "Готово"
+          }
+        }
+      }
+    },
+    "permission.accessibility.relaunch_hint": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "If the switch is already on, relaunch Luma Bar and this will show as done."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统设置里如果已经打开，重新打开 Luma Bar 后这里会显示已完成。"
+          }
+        }
+      }
+    },
+    "permission.state.not_applied": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On, relaunch to apply"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已打开，需重新打开应用后生效"
           }
         }
       }
@@ -18901,6 +18981,76 @@
         }
       }
     },
+    "island.music.netease_no_seek": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This version cannot move NetEase Cloud Music's playhead. Download this song to drag the bar."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这个版本无法调整网易云客户端的进度；下载这首歌后就能拖动。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這個版本無法調整網易雲用戶端的進度；下載這首歌後就能拖動。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このバージョンでは NetEase Cloud Music の再生位置を動かせません。この曲をダウンロードするとドラッグできます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This version cannot move NetEase Cloud Music's playhead. Download this song to drag the bar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This version cannot move NetEase Cloud Music's playhead. Download this song to drag the bar."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This version cannot move NetEase Cloud Music's playhead. Download this song to drag the bar."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This version cannot move NetEase Cloud Music's playhead. Download this song to drag the bar."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This version cannot move NetEase Cloud Music's playhead. Download this song to drag the bar."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This version cannot move NetEase Cloud Music's playhead. Download this song to drag the bar."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This version cannot move NetEase Cloud Music's playhead. Download this song to drag the bar."
+          }
+        }
+      }
+    },
     "island.music.prev_playlist": {
       "localizations": {
         "en": {
@@ -20367,6 +20517,426 @@
           "stringUnit": {
             "state": "translated",
             "value": "Прозрачность"
+          }
+        }
+      }
+    },
+    "menu.selection_translation": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selection Translation"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "划词翻译"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "劃詞翻譯"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選択テキストを翻訳"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "선택 텍스트 번역"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traduction de la sélection"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auswahl übersetzen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traducir selección"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traduzione della selezione"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traduzir seleção"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Перевод выделенного"
+          }
+        }
+      }
+    },
+    "translate.consent.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn on translation?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启划词翻译？"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟劃詞翻譯？"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻訳をオンにしますか？"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "번역을 켤까요?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activer la traduction ?"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzung einschalten?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Activar la traducción?"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attivare la traduzione?"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ativar a tradução?"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Включить перевод?"
+          }
+        }
+      }
+    },
+    "translate.consent.body": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When you copy the same text twice with Command-C, Luma Bar sends that text to an AI service (DeepSeek, or OpenAI if you chose it) to translate it. Nothing is sent while this feature is off, and you can turn it off in the menu at any time."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启后，你对同一段文字连按两次 ⌘C 时，Luma Bar 会把这段文字发送给 AI 服务（DeepSeek；如果你选了 OpenAI 则是 OpenAI）进行翻译。功能关闭时不会发送任何内容，你随时可以在菜单里关掉它。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟後，你對同一段文字連按兩次 ⌘C 時，Luma Bar 會把這段文字傳送給 AI 服務（DeepSeek；如果你選了 OpenAI 則是 OpenAI）進行翻譯。功能關閉時不會傳送任何內容，你隨時可以在選單裡關掉它。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同じテキストを ⌘C で 2 回コピーすると、Luma Bar はそのテキストを AI サービス（DeepSeek、または選択した場合は OpenAI）に送信して翻訳します。この機能がオフの間は何も送信されず、メニューからいつでもオフにできます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "같은 텍스트를 ⌘C로 두 번 복사하면 Luma Bar가 해당 텍스트를 AI 서비스(DeepSeek, 또는 선택한 경우 OpenAI)로 보내 번역합니다. 이 기능이 꺼져 있으면 아무것도 전송되지 않으며, 메뉴에서 언제든지 끌 수 있습니다."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lorsque vous copiez deux fois le même texte avec Commande-C, Luma Bar envoie ce texte à un service d'IA (DeepSeek, ou OpenAI si vous l'avez choisi) pour le traduire. Rien n'est envoyé lorsque cette fonction est désactivée, et vous pouvez la désactiver à tout moment depuis le menu."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wenn Sie denselben Text zweimal mit Befehl-C kopieren, sendet Luma Bar diesen Text zur Übersetzung an einen KI-Dienst (DeepSeek oder, falls ausgewählt, OpenAI). Solange diese Funktion aus ist, wird nichts gesendet; Sie können sie jederzeit im Menü ausschalten."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cuando copias el mismo texto dos veces con Comando-C, Luma Bar envía ese texto a un servicio de IA (DeepSeek, u OpenAI si lo elegiste) para traducirlo. No se envía nada mientras esta función esté desactivada, y puedes desactivarla en el menú en cualquier momento."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quando copi lo stesso testo due volte con Comando-C, Luma Bar invia quel testo a un servizio di IA (DeepSeek, oppure OpenAI se l'hai scelto) per tradurlo. Non viene inviato nulla mentre questa funzione è disattivata, e puoi disattivarla dal menu in qualsiasi momento."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quando você copia o mesmo texto duas vezes com Command-C, o Luma Bar envia esse texto a um serviço de IA (DeepSeek, ou OpenAI se você o escolheu) para traduzi-lo. Nada é enviado enquanto este recurso estiver desativado, e você pode desativá-lo no menu a qualquer momento."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Когда вы дважды копируете один и тот же текст сочетанием Command-C, Luma Bar отправляет этот текст в ИИ-сервис (DeepSeek или OpenAI, если вы его выбрали) для перевода. Пока функция выключена, ничего не отправляется; её можно выключить в меню в любой момент."
+          }
+        }
+      }
+    },
+    "translate.consent.allow": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn On"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "オンにする"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "켜기"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activer"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einschalten"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activar"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attiva"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ativar"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Включить"
+          }
+        }
+      }
+    },
+    "translate.consent.decline": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not Now"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂不开启"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暫不開啟"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今はしない"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "나중에"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plus tard"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nicht jetzt"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ahora no"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non ora"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agora não"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не сейчас"
+          }
+        }
+      }
+    },
+    "permission.guide.automation.2.store": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Or open Privacy & Security → Automation and allow Music"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "或打开「隐私与安全性 → 自动化」，允许控制 Music"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "或打開「隱私權與安全性 → 自動化」，允許控制 Music"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "またはオートメーションで Music を許可"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "또는 자동화에서 Music 허용"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ou ouvrez Automatisation et autorisez Music"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oder Automation öffnen und Music erlauben"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O abre Automatización y permite Music"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oppure apri Automazione e consenti Music"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ou abra Automação e permita Music"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Или откройте Автоматизацию и разрешите Music"
           }
         }
       }

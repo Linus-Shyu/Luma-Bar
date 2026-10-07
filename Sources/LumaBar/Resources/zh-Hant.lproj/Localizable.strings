@@ -270,6 +270,7 @@
 "island.music.pause" = "暫停";
 "island.music.seek" = "跳轉";
 "island.music.no_timeline" = "暫無時間軸";
+"island.music.netease_no_seek" = "這個版本無法調整網易雲用戶端的進度；下載這首歌後就能拖動。";
 "island.music.prev_playlist" = "上一歌單";
 "island.music.next_playlist" = "下一歌單";
 "island.music.open_player" = "打開播放器";
@@ -290,3 +291,9 @@
 "island.library.local_file" = "本機檔案";
 "agent.configure_key_format" = "請設定 %@ API Key，或注入內建金鑰。";
 "agent.configure_key_first_format" = "請先設定 %@ API Key，或在建置時注入內建金鑰。";
+"menu.selection_translation" = "劃詞翻譯";
+"translate.consent.title" = "開啟劃詞翻譯？";
+"translate.consent.body" = "開啟後，你對同一段文字連按兩次 ⌘C 時，Luma Bar 會把這段文字傳送給 AI 服務（DeepSeek；如果你選了 OpenAI 則是 OpenAI）進行翻譯。功能關閉時不會傳送任何內容，你隨時可以在選單裡關掉它。";
+"translate.consent.allow" = "開啟";
+"translate.consent.decline" = "暫不開啟";
+"permission.guide.automation.2.store" = "或打開「隱私權與安全性 → 自動化」，允許控制 Music";

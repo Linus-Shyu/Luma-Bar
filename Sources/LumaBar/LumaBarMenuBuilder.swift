@@ -12,6 +12,8 @@ final class LumaBarMenuBuilder {
     private var statusLanguageItems: [LumaBarAppLanguage: NSMenuItem] = [:]
     private weak var appShowHideItem: NSMenuItem?
     private weak var statusShowHideItem: NSMenuItem?
+    private weak var appSelectionTranslationItem: NSMenuItem?
+    private weak var statusSelectionTranslationItem: NSMenuItem?
 
     private static let themeShortcutDigits: [IslandTheme: String] = [
         .void: "1",
@@ -45,6 +47,7 @@ final class LumaBarMenuBuilder {
             themeStorage: &appThemeItems,
             languageStorage: &appLanguageItems,
             showHideStorage: &appShowHideItem,
+            selectionTranslationStorage: &appSelectionTranslationItem,
             includeThemeKeyEquivalents: true,
             includeQuitKeyEquivalent: true
         )
@@ -72,6 +75,7 @@ final class LumaBarMenuBuilder {
             themeStorage: &statusThemeItems,
             languageStorage: &statusLanguageItems,
             showHideStorage: &statusShowHideItem,
+            selectionTranslationStorage: &statusSelectionTranslationItem,
             includeThemeKeyEquivalents: false,
             includeQuitKeyEquivalent: true
         )
@@ -96,6 +100,11 @@ final class LumaBarMenuBuilder {
         }
     }
 
+    func updateSelectionTranslationState(isEnabled: Bool) {
+        appSelectionTranslationItem?.state = isEnabled ? .on : .off
+        statusSelectionTranslationItem?.state = isEnabled ? .on : .off
+    }
+
     func updatePanelVisibility(isExpanded: Bool) {
         let title = isExpanded ? LumaBarL10n.hideMainPanel : LumaBarL10n.showMainPanel
         appShowHideItem?.title = title
@@ -105,13 +114,14 @@ final class LumaBarMenuBuilder {
     // MARK: - Layout
 
     /// Group 1: Theme + Language + Show/Hide
-    /// Group 2: Permissions + Help + About
+    /// Group 2: Selection Translation + Permissions + Help + About
     /// Group 3: Quit
     private func populatePrimaryGroups(
         into menu: NSMenu,
         themeStorage: inout [IslandTheme: NSMenuItem],
         languageStorage: inout [LumaBarAppLanguage: NSMenuItem],
         showHideStorage: inout NSMenuItem?,
+        selectionTranslationStorage: inout NSMenuItem?,
         includeThemeKeyEquivalents: Bool,
         includeQuitKeyEquivalent: Bool
     ) {
@@ -142,10 +152,23 @@ final class LumaBarMenuBuilder {
         menu.addItem(.separator())
 
         // —— Group 2: Settings & Help ——
+        let selectionTranslation = makeItem(
+            title: LumaBarL10n.selectionTranslationMenu,
+            action: #selector(AppDelegate.toggleSelectionTranslation)
+        )
+        menu.addItem(selectionTranslation)
+        selectionTranslationStorage = selectionTranslation
+
         menu.addItem(makeItem(
             title: LumaBarL10n.permissions,
             action: #selector(AppDelegate.showPermissionSetupFromMenu)
         ))
+#if LUMA_APP_STORE
+        menu.addItem(makeItem(
+            title: "授权数据目录…",
+            action: #selector(AppDelegate.grantCursorFolderAccess)
+        ))
+#endif
         menu.addItem(makeItem(
             title: LumaBarL10n.help,
             action: #selector(AppDelegate.showHelpFromMenu),

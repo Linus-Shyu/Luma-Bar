@@ -98,6 +98,8 @@ enum LumaBarPermissionState: Equatable {
     case authorized
     case denied
     case restricted
+    /// Prompted, but this process is still not trusted. Often the Settings switch belongs to another copy.
+    case notApplied
 
     var isAuthorized: Bool { self == .authorized }
     var isBlocking: Bool { self == .denied || self == .restricted }
@@ -109,6 +111,7 @@ enum LumaBarPermissionState: Equatable {
         case .authorized: LumaBarL10n.permissionStateDone
         case .denied: LumaBarL10n.permissionStateOff
         case .restricted: LumaBarL10n.permissionStateRestricted
+        case .notApplied: LumaBarL10n.permissionStateNotApplied
         }
     }
 }
@@ -211,7 +214,12 @@ final class PermissionOnboardingModel: ObservableObject {
             if requesting.contains(permission), next[permission]?.isAuthorized != true {
                 next[permission] = .requesting
             } else if next[permission] == .notDetermined, Self.hasPrompted(permission) {
-                next[permission] = .denied
+                // These two stay untrusted in this process until the exact binary is allowed.
+                // A switch that is already on for another copy is not a denial.
+                // Automation must not take this path: an inconclusive check is not "off".
+                if permission == .accessibility || permission == .screenRecording {
+                    next[permission] = .notApplied
+                }
             }
         }
 
@@ -298,11 +306,13 @@ final class PermissionOnboardingModel: ObservableObject {
         UserDefaults.standard.set(true, forKey: Self.completionKey)
         Self.persistSkipped(skipped)
 
+        // Only nag about permissions this build actually asks for.
+        let onboarding = Set(LumaBarPermission.onboardingCases)
         var tips: [String] = []
-        if states[.accessibility]?.isAuthorized != true {
+        if onboarding.contains(.accessibility), states[.accessibility]?.isAuthorized != true {
             tips.append(LumaBarL10n.permissionTipAccessibility)
         }
-        if states[.automation]?.isAuthorized != true {
+        if onboarding.contains(.automation), states[.automation]?.isAuthorized != true {
             tips.append(LumaBarL10n.permissionTipAutomation)
         }
         if skipped.contains(.screenRecording), states[.screenRecording]?.isAuthorized != true {
@@ -367,7 +377,7 @@ final class PermissionOnboardingModel: ObservableObject {
         for permission in LumaBarPermission.onboardingCases {
             switch permission {
             case .accessibility:
-                map[permission] = AXIsProcessTrusted() ? .authorized : .notDetermined
+                map[permission] = accessibilityIsTrusted ? .authorized : .notDetermined
             case .automation:
                 map[permission] = probeAutomation(prompt: false)
             case .screenRecording:
@@ -378,7 +388,12 @@ final class PermissionOnboardingModel: ObservableObject {
     }
 
     private static func probeAutomation(prompt: Bool) -> LumaBarPermissionState {
+#if LUMA_APP_STORE
+        // Only targets listed in temporary-exception.apple-events are reachable under the sandbox.
+        let targets = ["com.apple.Music"]
+#else
         let targets = ["com.apple.Music", "com.apple.systemevents"]
+#endif
         var sawNotDetermined = false
         var sawDenied = false
         var sawAuthorized = false
@@ -397,19 +412,66 @@ final class PermissionOnboardingModel: ObservableObject {
         }
 
         if sawAuthorized { return .authorized }
-        if sawDenied { return .denied }
-        if sawNotDetermined { return .notDetermined }
+        if sawDenied, !sawNotDetermined { return .denied }
         return .notDetermined
     }
 
+    /// `AXIsProcessTrusted()` stays false until the quiet options check refreshes it,
+    /// even when this copy is already allowed in Settings.
+    private static var accessibilityIsTrusted: Bool {
+        if AXIsProcessTrusted() { return true }
+        let quiet = ["AXTrustedCheckOptionPrompt": false] as CFDictionary
+        return AXIsProcessTrustedWithOptions(quiet)
+    }
+
+    /// Property reads (`get name`, player state) are the events Music actually grants.
+    /// A wildcard query often returns "not permitted" after that grant, which made the
+    /// panel say Off while System Settings showed the switch on.
     private static func automationOSStatus(bundleID: String, prompt: Bool) -> OSStatus {
-        let target = NSAppleEventDescriptor(bundleIdentifier: bundleID)
-        return AEDeterminePermissionToAutomateTarget(
-            target.aeDesc,
-            typeWildCard,
-            typeWildCard,
-            prompt
-        )
+        let target = NSAppleEventDescriptor(bundleIdentifier: bundleID).aeDesc
+        let coreSuite: AEEventClass = 0x636F7265 // 'core'
+        let getData: AEEventID = 0x67657464 // 'getd'
+        let queries: [(AEEventClass, AEEventID, Bool)] = [
+            (coreSuite, getData, prompt),
+            (typeWildCard, typeWildCard, false)
+        ]
+        var sawDenied = false
+        var sawNotDetermined = false
+        for (eventClass, eventID, ask) in queries {
+            let status = AEDeterminePermissionToAutomateTarget(target, eventClass, eventID, ask)
+            if status == noErr { return noErr }
+            if status == AutomationTCC.notPermitted {
+                sawDenied = true
+            } else if status == AutomationTCC.wouldRequireConsent {
+                sawNotDetermined = true
+            }
+        }
+        if sawDenied, !sawNotDetermined { return AutomationTCC.notPermitted }
+        return AutomationTCC.wouldRequireConsent
+    }
+
+    /// Other installed apps with this bundle ID. Their Accessibility switch does not cover this process.
+    static func otherInstalledCopies() -> [URL] {
+        let mine = Bundle.main.bundleURL.standardizedFileURL.resolvingSymlinksInPath()
+        return NSWorkspace.shared.urlsForApplications(withBundleIdentifier: "com.lumabar.app")
+            .map { $0.standardizedFileURL.resolvingSymlinksInPath() }
+            .filter { $0 != mine }
+    }
+
+    func revealRunningCopy() {
+        NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+    }
+
+    func relaunch() {
+        let url = Bundle.main.bundleURL
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
+            guard error == nil else { return }
+            DispatchQueue.main.async {
+                NSApp.terminate(nil)
+            }
+        }
     }
 
     static func openPrivacySettings(for permission: LumaBarPermission) {
@@ -579,6 +641,7 @@ struct PermissionOnboardingView: View {
         let state = displayState(for: permission)
         let isSkipped = model.skipped.contains(permission)
         let showGuide = model.expandedGuide == permission
+        let hasOtherCopy = state == .notApplied && !PermissionOnboardingModel.otherInstalledCopies().isEmpty
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
@@ -611,6 +674,17 @@ struct PermissionOnboardingView: View {
                         .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+
+                    if state == .notApplied {
+                        Text(
+                            hasOtherCopy
+                                ? LumaBarL10n.permissionAccessibilityOtherCopy
+                                : LumaBarL10n.permissionAccessibilityRelaunchHint
+                        )
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(accent)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
 
@@ -639,6 +713,24 @@ struct PermissionOnboardingView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+
+                    if state == .notApplied {
+                        Button {
+                            if hasOtherCopy {
+                                model.revealRunningCopy()
+                            } else {
+                                model.relaunch()
+                            }
+                        } label: {
+                            Label(
+                                hasOtherCopy ? LumaBarL10n.permissionRevealCopy : LumaBarL10n.permissionRelaunch,
+                                systemImage: hasOtherCopy ? "folder" : "arrow.clockwise"
+                            )
+                            .font(.system(size: 12, weight: .medium))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
 
                     if !permission.isCore {
                         Button(isSkipped ? LumaBarL10n.permissionUnskip : LumaBarL10n.permissionSkip) {
@@ -719,7 +811,7 @@ struct PermissionOnboardingView: View {
     private func statusColor(state: LumaBarPermissionState, skipped: Bool) -> Color {
         if state.isAuthorized { return success }
         if skipped { return .secondary }
-        if state == .requesting { return accent }
+        if state == .requesting || state == .notApplied { return accent }
         if state.isBlocking { return danger }
         return .secondary
     }

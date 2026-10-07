@@ -41,6 +41,12 @@ echo "Building with LUMA_APP_STORE=1 (Package.swift define + -Xswiftc -DLUMA_APP
 # Also pass -Xswiftc -DLUMA_APP_STORE so the macro cannot be dropped if Package.swift is bypassed.
 swift build -c release -Xswiftc -DLUMA_APP_STORE
 cp "$ROOT/.build/release/LumaBar" "$APP/Contents/MacOS/LumaBar"
+# SwiftPM looks for this beside the .app bundle root. A sandboxed app cannot fall back to .build.
+RESOURCE_BUNDLE="$ROOT/.build/release/LumaBar_LumaBar.bundle"
+if [[ -d "$RESOURCE_BUNDLE" ]]; then
+  rm -rf "$APP/LumaBar_LumaBar.bundle"
+  cp -R "$RESOURCE_BUNDLE" "$APP/LumaBar_LumaBar.bundle"
+fi
 
 # Guardrail: private MediaRemote must not appear in the MAS binary.
 if nm -u "$APP/Contents/MacOS/LumaBar" 2>/dev/null | grep -qi 'MediaRemote'; then
@@ -80,5 +86,5 @@ else
 fi
 
 echo "Built MAS-oriented app: $APP"
-echo "Entitlements: $ENTITLEMENTS (includes temporary-exception.apple-events for Music + NetEase)"
+echo "Entitlements: $ENTITLEMENTS (temporary-exception.apple-events: Music + Messages only)"
 echo "Next: archive via Xcode with Mac App Store distribution profile, or transporter upload."

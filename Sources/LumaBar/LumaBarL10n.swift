@@ -130,8 +130,27 @@ enum LumaBarL10n {
         tr("help.shortcut.voice.detail", "Start or stop speech-to-text into the Agent field.")
     }
     static var helpTranslateTitle: String { tr("help.shortcut.translate.title", "Selection translation") }
+    static var selectionTranslationMenu: String { tr("menu.selection_translation", "Selection Translation") }
+    static var selectionTranslationConsentTitle: String {
+        tr("translate.consent.title", "Turn on translation?")
+    }
+    static var selectionTranslationConsentBody: String {
+        tr(
+            "translate.consent.body",
+            "When you copy the same text twice with Command-C, Luma Bar sends that text to an AI service (DeepSeek, or OpenAI if you chose it) to translate it. Nothing is sent while this feature is off, and you can turn it off in the menu at any time."
+        )
+    }
+    static var selectionTranslationConsentAllow: String { tr("translate.consent.allow", "Turn On") }
+    static var selectionTranslationConsentDecline: String { tr("translate.consent.decline", "Not Now") }
     static var helpTranslateDetail: String {
+#if LUMA_APP_STORE
+        tr(
+            "help.shortcut.translate.detail.store",
+            "Press Command-C twice: the first copy stays a copy; the second translates (when this feature is on)."
+        )
+#else
         tr("help.shortcut.translate.detail", "Hold Option and release a selection to translate (when enabled).")
+#endif
     }
     static var helpThemeTitle: String { tr("help.shortcut.theme.title", "Switch theme") }
     static var helpThemeDetail: String {
@@ -143,7 +162,14 @@ enum LumaBarL10n {
     }
     static var helpMusicTitle: String { tr("help.feature.music.title", "Music & lyrics") }
     static var helpMusicDetail: String {
+#if LUMA_APP_STORE
+        tr(
+            "help.feature.music.detail.store",
+            "Sync Apple Music and NetEase. Lyrics show when you expand; the progress bar appears for Apple Music and local files."
+        )
+#else
         tr("help.feature.music.detail", "Sync Apple Music / NetEase playback; expand for progress and lyrics.")
+#endif
     }
     static var helpAgentTitle: String { tr("help.feature.agent.title", "Agent assistant") }
     static var helpAgentDetail: String {
@@ -353,6 +379,12 @@ enum LumaBarL10n {
     static var musicPause: String { tr("island.music.pause", "Pause") }
     static var musicSeek: String { tr("island.music.seek", "Seek") }
     static var musicNoTimeline: String { tr("island.music.no_timeline", "No timeline available") }
+    static var musicNetEaseNoSeek: String {
+        tr(
+            "island.music.netease_no_seek",
+            "This version cannot move NetEase Cloud Music's playhead. Download this song to drag the bar."
+        )
+    }
     static var musicPrevPlaylist: String { tr("island.music.prev_playlist", "Previous playlist") }
     static var musicNextPlaylist: String { tr("island.music.next_playlist", "Next playlist") }
     static var musicOpenPlayer: String { tr("island.music.open_player", "Open player") }
@@ -383,6 +415,20 @@ enum LumaBarL10n {
     static var permissionAuthorize: String { tr("permission.authorize", "Allow") }
     static var permissionRetry: String { tr("permission.retry", "Retry") }
     static var permissionOpenSettings: String { tr("permission.open_settings", "Open Settings") }
+    static var permissionRevealCopy: String { tr("permission.reveal_copy", "Show This Copy") }
+    static var permissionRelaunch: String { tr("permission.relaunch", "Relaunch") }
+    static var permissionAccessibilityOtherCopy: String {
+        tr(
+            "permission.accessibility.other_copy",
+            "The luma bar switch that is already on belongs to another install. Show this copy, then add it with the + button in Accessibility."
+        )
+    }
+    static var permissionAccessibilityRelaunchHint: String {
+        tr(
+            "permission.accessibility.relaunch_hint",
+            "If the switch is already on, relaunch Luma Bar and this will show as done."
+        )
+    }
     static var permissionSkip: String { tr("permission.skip", "Skip") }
     static var permissionUnskip: String { tr("permission.unskip", "Undo skip") }
     static var permissionShowGuide: String { tr("permission.show_guide", "How to enable?") }
@@ -405,7 +451,14 @@ enum LumaBarL10n {
     }
     static var permissionAutomationTitle: String { tr("permission.automation.title", "Automation") }
     static var permissionAutomationSubtitle: String {
+#if LUMA_APP_STORE
+        tr(
+            "permission.automation.subtitle.store",
+            "Lets Luma Bar control the Music app. NetEase does not use this permission."
+        )
+#else
         tr("permission.automation.subtitle", "Sync Apple Music / NetEase playback via AppleScript")
+#endif
     }
     static var permissionScreenTitle: String { tr("permission.screen.title", "Screen Recording") }
     static var permissionScreenSubtitle: String {
@@ -415,6 +468,7 @@ enum LumaBarL10n {
     static var permissionStateRequesting: String { tr("permission.state.requesting", "Requesting…") }
     static var permissionStateDone: String { tr("permission.state.done", "Done") }
     static var permissionStateOff: String { tr("permission.state.off", "Off") }
+    static var permissionStateNotApplied: String { tr("permission.state.not_applied", "Not this copy") }
     static var permissionStateRestricted: String { tr("permission.state.restricted", "Restricted") }
     static var permissionStateSkipped: String { tr("permission.state.skipped", "Skipped") }
     static var permissionGuideAccessibility1: String { tr("permission.guide.accessibility.1", "Tap Allow or Open Settings") }
@@ -422,13 +476,17 @@ enum LumaBarL10n {
         tr("permission.guide.accessibility.2", "In Privacy & Security → Accessibility, find luma bar")
     }
     static var permissionGuideAccessibility3: String {
-        tr("permission.guide.accessibility.3", "Turn the switch on, then return here (no restart needed)")
+        tr("permission.guide.accessibility.3", "Turn on the switch for this copy. A luma bar that is already on may be a different install.")
     }
     static var permissionGuideAutomation1: String {
         tr("permission.guide.automation.1", "Tap Allow and choose OK in the system prompt")
     }
     static var permissionGuideAutomation2: String {
+#if LUMA_APP_STORE
+        tr("permission.guide.automation.2.store", "Or open Privacy & Security → Automation and allow Music")
+#else
         tr("permission.guide.automation.2", "Or open Privacy & Security → Automation and allow Music / System Events")
+#endif
     }
     static var permissionGuideAutomation3: String {
         tr("permission.guide.automation.3", "Return to Luma Bar and status refreshes automatically")
