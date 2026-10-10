@@ -30,7 +30,7 @@ Or build a local app bundle:
 open "luma bar.app"
 ```
 
-Needs **macOS 14+** and a Swift 6 toolchain. A notched MacBook is recommended for the full island layout.
+Needs **macOS 14+** and a Swift 6 toolchain. A Mac with a camera notch is recommended for the full island layout.
 
 ## Pull requests
 
@@ -38,7 +38,7 @@ Needs **macOS 14+** and a Swift 6 toolchain. A notched MacBook is recommended fo
 - Prefer clear commit messages that explain *why*.
 - Use the repository PR template: summary + test plan.
 - Do **not** commit secrets, API keys, certificates, or local `.app` / build products.
-- **Liquid Glass / island chrome is frozen.** Do not restyle glass fills, panel transparency, or related theme tokens unless maintainers explicitly ask.
+- **Island chrome visuals are frozen.** Do not restyle glass fills, panel transparency, or related theme tokens unless maintainers explicitly ask.
 - **Do not change GitHub Actions / release / notarization pipelines** (anything under `.github/workflows/`) unless maintainers request it.
 
 ## Bug reports

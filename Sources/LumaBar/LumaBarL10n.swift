@@ -1,69 +1,7 @@
 import Foundation
 
-/// User-selectable app language. Default follows the system.
-enum LumaBarAppLanguage: String, CaseIterable, Identifiable {
-    case system
-    case english = "en"
-    case simplifiedChinese = "zh-Hans"
-    case traditionalChinese = "zh-Hant"
-    case japanese = "ja"
-    case korean = "ko"
-    case french = "fr"
-    case german = "de"
-    case spanish = "es"
-    case portugueseBrazil = "pt-BR"
-    case italian = "it"
-    case russian = "ru"
-
-    var id: String { rawValue }
-
-    static let defaultsKey = "LumaBar.appLanguage"
-    static let didChangeNotification = Notification.Name("LumaBarLanguageDidChange")
-
-    /// Bundled localizations (excluding `system`).
-    static let bundledCodes: [String] = [
-        "en", "zh-Hans", "zh-Hant", "ja", "ko", "fr", "de", "es", "pt-BR", "it", "ru"
-    ]
-
-    /// Native-script labels so users can find their language in any UI locale.
-    var menuTitle: String {
-        switch self {
-        case .system: return LumaBarL10n.languageFollowSystem
-        case .english: return LumaBarL10n.languageEnglish
-        case .simplifiedChinese: return LumaBarL10n.languageSimplifiedChinese
-        case .traditionalChinese: return LumaBarL10n.languageTraditionalChinese
-        case .japanese: return LumaBarL10n.languageJapanese
-        case .korean: return LumaBarL10n.languageKorean
-        case .french: return LumaBarL10n.languageFrench
-        case .german: return LumaBarL10n.languageGerman
-        case .spanish: return LumaBarL10n.languageSpanish
-        case .portugueseBrazil: return LumaBarL10n.languagePortuguese
-        case .italian: return LumaBarL10n.languageItalian
-        case .russian: return LumaBarL10n.languageRussian
-        }
-    }
-
-    var overrideCode: String? {
-        self == .system ? nil : rawValue
-    }
-
-    static var current: LumaBarAppLanguage {
-        let raw = UserDefaults.standard.string(forKey: defaultsKey) ?? system.rawValue
-        return LumaBarAppLanguage(rawValue: raw) ?? .system
-    }
-
-    static func setCurrent(_ language: LumaBarAppLanguage) {
-        if language == .system {
-            UserDefaults.standard.removeObject(forKey: defaultsKey)
-        } else {
-            UserDefaults.standard.set(language.rawValue, forKey: defaultsKey)
-        }
-        LumaBarL10n.applyPreferredLanguage()
-        NotificationCenter.default.post(name: didChangeNotification, object: language)
-    }
-}
-
 /// Centralized String Catalog lookups for Luma Bar.
+/// The UI language always follows the operating system; there is no manual picker.
 enum LumaBarL10n {
     static var appName: String { tr("app.name", "Luma Bar") }
 
@@ -71,19 +9,6 @@ enum LumaBarL10n {
 
     static var theme: String { tr("menu.theme", "Theme") }
     static var auraOpacity: String { tr("menu.theme.aura_opacity", "Opacity") }
-    static var language: String { tr("menu.language", "Language") }
-    static var languageFollowSystem: String { tr("menu.language.system", "Follow System") }
-    static var languageEnglish: String { tr("menu.language.english", "English") }
-    static var languageSimplifiedChinese: String { tr("menu.language.zh_hans", "简体中文") }
-    static var languageTraditionalChinese: String { tr("menu.language.zh_hant", "繁體中文") }
-    static var languageJapanese: String { tr("menu.language.japanese", "日本語") }
-    static var languageKorean: String { tr("menu.language.korean", "한국어") }
-    static var languageFrench: String { tr("menu.language.french", "Français") }
-    static var languageGerman: String { tr("menu.language.german", "Deutsch") }
-    static var languageSpanish: String { tr("menu.language.spanish", "Español") }
-    static var languagePortuguese: String { tr("menu.language.portuguese", "Português (Brasil)") }
-    static var languageItalian: String { tr("menu.language.italian", "Italiano") }
-    static var languageRussian: String { tr("menu.language.russian", "Русский") }
 
     static var showMainPanel: String { tr("menu.show_main_panel", "Show Main Panel") }
     static var hideMainPanel: String { tr("menu.hide_main_panel", "Hide Main Panel") }
@@ -590,30 +515,27 @@ enum LumaBarL10n {
     // MARK: Locale / Bundle
 
     static var resolvedLanguageCode: String {
-        if let override = LumaBarAppLanguage.current.overrideCode {
-            return override
-        }
-        return matchSystemLanguage()
+        matchSystemLanguage()
     }
 
     static var resolvedLocale: Locale {
         Locale(identifier: resolvedLanguageCode)
     }
 
-    static func applyPreferredLanguage() {
-        if let code = LumaBarAppLanguage.current.overrideCode {
-            UserDefaults.standard.set([code], forKey: "AppleLanguages")
-        } else {
-            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
-        }
-        UserDefaults.standard.synchronize()
-        bundleLock.lock()
-        cachedLocalizedBundle = nil
-        bundleLock.unlock()
-    }
-
     private static let bundleLock = NSLock()
     nonisolated(unsafe) private static var cachedLocalizedBundle: Bundle?
+    nonisolated(unsafe) private static var systemLocaleObserver: NSObjectProtocol? = {
+        let observer = NotificationCenter.default.addObserver(
+            forName: NSLocale.currentLocaleDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            bundleLock.lock()
+            cachedLocalizedBundle = nil
+            bundleLock.unlock()
+        }
+        return observer
+    }()
 
     static var resourceBundle: Bundle {
         // Prefer the packaged resource bundle inside the .app (SPM lowercases *.lproj names).
@@ -671,6 +593,10 @@ enum LumaBarL10n {
     }
 
     private static func matchSystemLanguage() -> String {
+        /// Bundled localizations.
+        let bundledCodes = [
+            "en", "zh-Hans", "zh-Hant", "ja", "ko", "fr", "de", "es", "pt-BR", "it", "ru"
+        ]
         let preferred = Locale.preferredLanguages
         for raw in preferred {
             let lowered = raw.lowercased()
@@ -699,7 +625,7 @@ enum LumaBarL10n {
             case "pt-br", "pt": normalized = "pt-BR"
             default: normalized = raw
             }
-            if LumaBarAppLanguage.bundledCodes.contains(normalized) {
+            if bundledCodes.contains(normalized) {
                 return normalized
             }
         }

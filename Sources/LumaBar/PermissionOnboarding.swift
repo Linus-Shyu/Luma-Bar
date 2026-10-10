@@ -554,9 +554,6 @@ struct PermissionOnboardingView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.syncFromSystemSettings()
         }
-        .onReceive(NotificationCenter.default.publisher(for: LumaBarAppLanguage.didChangeNotification)) { _ in
-            languageRevision += 1
-        }
         .onAppear { model.refresh() }
     }
 

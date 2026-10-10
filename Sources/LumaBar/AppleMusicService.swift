@@ -1,7 +1,6 @@
 import AppKit
 import Foundation
 
-private let appleMusicBundleIdentifier = "com.apple.Music"
 private let appleMusicPlayerInfoNotification = Notification.Name("com.apple.Music.playerInfo")
 
 /// Explicit Music.app transport state — Play/Pause UI binds to this, not local click toggles.
@@ -32,6 +31,11 @@ final class AppleMusicService: MusicServiceProtocol {
     /// Last non-zero position for the current track — survives pause notifications that report 0.
     private var lastValidPlaybackTime: TimeInterval = 0
     private var lastValidTrackKey = ""
+    /// Bumped on local play/pause/seek so an in-flight poll cannot rewind the playhead.
+    private var transportEpoch: UInt = 0
+    private var refreshPending = false
+    /// Music's first reply after Play is often still "paused" / position 0.
+    private var suppressPausedSampleUntil = Date.distantPast
 
     var isPlaying: Bool { playerState == .playing }
     var playbackTime: TimeInterval {
@@ -73,10 +77,10 @@ final class AppleMusicService: MusicServiceProtocol {
     }
 
     func play() {
+        bumpTransportEpoch()
+        suppressPausedSampleUntil = Date().addingTimeInterval(1.2)
         if var track = currentTrack {
-            if progressClock.cachedPosition <= 0.05, lastValidPlaybackTime > 0.05 {
-                progressClock.seek(to: lastValidPlaybackTime)
-            }
+            restorePlayheadIfNeeded()
             progressClock.resumePlayback()
             track.isPlaying = true
             track.position = progressClock.calculatedCurrentTime()
@@ -130,6 +134,8 @@ final class AppleMusicService: MusicServiceProtocol {
     }
 
     func pause() {
+        bumpTransportEpoch()
+        suppressPausedSampleUntil = .distantPast
         progressClock.lockForPause()
         let locked = progressClock.calculatedCurrentTime()
         if locked > 0.05 {
@@ -171,11 +177,15 @@ final class AppleMusicService: MusicServiceProtocol {
 
     /// Force Play/Pause + progress clock to match Music.app's reported state.
     func bindPlayerState(_ state: AppleMusicPlayerState) {
+        bumpTransportEpoch()
         playerState = state
         let playing = state == .playing
         if playing {
+            suppressPausedSampleUntil = Date().addingTimeInterval(1.2)
+            restorePlayheadIfNeeded()
             progressClock.resumePlayback()
         } else {
+            suppressPausedSampleUntil = .distantPast
             progressClock.lockForPause()
         }
         if var track = currentTrack {
@@ -247,6 +257,7 @@ final class AppleMusicService: MusicServiceProtocol {
     /// - Parameter resumePlayback: When true, Music.app is forced to `play` after the position
     ///   update — setting `player position` often pauses playback.
     func seek(to position: TimeInterval, resumePlayback: Bool?) {
+        bumpTransportEpoch()
         let seconds = max(0, position)
         let shouldResume = resumePlayback ?? isPlaying
         progressClock.seek(to: seconds)
@@ -306,23 +317,43 @@ final class AppleMusicService: MusicServiceProtocol {
     }
 
     func refresh(completion: (@MainActor () -> Void)?) {
-        let now = Date()
-        guard !isRefreshing else {
+        refresh(completion: completion, force: false)
+    }
+
+    private func refresh(completion: (@MainActor () -> Void)?, force: Bool) {
+        if isRefreshing {
+            refreshPending = true
             completion?()
             return
         }
-        guard now.timeIntervalSince(lastRefreshDate) >= 0.2 else {
+        let now = Date()
+        guard force || now.timeIntervalSince(lastRefreshDate) >= 0.2 else {
             completion?()
             return
         }
         lastRefreshDate = now
         isRefreshing = true
+        let epoch = transportEpoch
+        let finish: @MainActor (MusicNowPlayingInfo?) -> Void = { [weak self] info in
+            guard let self else { return }
+            let missedTransport = epoch != self.transportEpoch
+            if !missedTransport {
+                self.apply(info)
+            }
+            self.isRefreshing = false
+            let followUp = self.refreshPending && missedTransport
+            self.refreshPending = false
+            completion?()
+            if followUp {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                    self?.refresh(completion: nil, force: true)
+                }
+            }
+        }
 
 #if LUMA_APP_STORE
-        refreshViaAppleScript { [weak self] info in
-            self?.apply(info)
-            self?.isRefreshing = false
-            completion?()
+        refreshViaAppleScript { info in
+            finish(info)
         }
 #else
         NetEaseBridge.shared.fetchNowPlaying(
@@ -341,16 +372,12 @@ final class AppleMusicService: MusicServiceProtocol {
                         duration: Self.normalizedDurationSeconds(snapshot.duration),
                         isPlaying: snapshot.isPlaying
                     )
-                    self.apply(mapped)
-                    self.isRefreshing = false
-                    completion?()
+                    finish(mapped)
                     return
                 }
 
                 self.refreshViaAppleScript { info in
-                    self.apply(info)
-                    self.isRefreshing = false
-                    completion?()
+                    finish(info)
                 }
             }
         }
@@ -368,6 +395,7 @@ final class AppleMusicService: MusicServiceProtocol {
         if playingChanged {
             track.isPlaying = playing
             if playing {
+                restorePlayheadIfNeeded()
                 progressClock.resumePlayback()
             } else {
                 progressClock.lockForPause()
@@ -444,6 +472,17 @@ final class AppleMusicService: MusicServiceProtocol {
 
     // MARK: - Private
 
+    private func bumpTransportEpoch() {
+        transportEpoch &+= 1
+    }
+
+    /// Resume from the last real position when the clock was wiped by a zero poll.
+    private func restorePlayheadIfNeeded() {
+        if progressClock.cachedPosition <= 0.05, lastValidPlaybackTime > 0.05 {
+            progressClock.seek(to: lastValidPlaybackTime)
+        }
+    }
+
     private func scheduleRefresh(after delay: TimeInterval = 0.25) {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             self?.refresh(completion: nil)
@@ -491,14 +530,14 @@ final class AppleMusicService: MusicServiceProtocol {
                 pendingSeekExpiresAt = .distantPast
             }
 
-            if !incoming.isPlaying,
-               incoming.position <= 0.05,
+            // Playing samples also report 0 while Music wakes the playhead. Keep the
+            // position we already had so the bar does not restart at the beginning.
+            if incoming.position <= 0.05,
                (sameAsCurrent || sameAsCached),
                lastValidPlaybackTime > 0.05
             {
                 incoming.position = lastValidPlaybackTime
-            } else if !incoming.isPlaying,
-                      incoming.position <= 0.05,
+            } else if incoming.position <= 0.05,
                       let current = currentTrack,
                       sameAsCurrent,
                       current.position > 0.05
@@ -533,6 +572,10 @@ final class AppleMusicService: MusicServiceProtocol {
             }
 
             incoming.duration = Self.normalizedDurationSeconds(incoming.duration)
+
+            if !incoming.isPlaying, Date() < suppressPausedSampleUntil {
+                incoming.isPlaying = true
+            }
 
             // Bind playerState directly from Music.app's reported isPlaying.
             playerState = incoming.isPlaying ? .playing : .paused

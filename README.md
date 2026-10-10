@@ -1,6 +1,6 @@
 # Luma Bar [![Release](https://img.shields.io/github/v/release/Linus-Shyu/Luma-Bar?label=release)](https://github.com/Linus-Shyu/Luma-Bar/releases/latest)
 
-Luma Bar 是围绕 MacBook 摄像头刘海生长的原生 macOS 桌面工作空间：在刘海两侧安全区里承载音乐、本地 AI Agent、语音输入、任务完成提醒、系统控制与桌面宠物，同时不遮挡中间摄像头。
+Luma Bar 是围绕 Mac 摄像头刘海生长的原生 macOS 桌面工作空间：在刘海两侧安全区里承载音乐、本地 AI Agent、语音输入、任务完成提醒、系统控制与桌面宠物，同时不遮挡中间摄像头。
 
 > [!NOTE]
 > English documentation: [README.en.md](README.en.md).
@@ -10,7 +10,7 @@ Luma Bar 是围绕 MacBook 摄像头刘海生长的原生 macOS 桌面工作空�
 1. **原生刘海布局** — 使用 `auxiliaryTopLeftArea` / `auxiliaryTopRightArea`，摄像头居中不被盖住
 2. **音乐与歌词** — 本地音频、网易云歌单，实时封面 / 进度 / 同步歌词
 3. **本地 AI Agent** — 流式回复、长期偏好、近期操作上下文、需确认的本地动作
-4. **Cursor / Codex 感知** — 上下文窗口用量，任务完成时在刘海内提醒
+4. **Cursor / Codex / DeepSeek Harness 感知** — 上下文窗口用量，任务完成时在刘海内提醒
 5. **Voice Whisper** — `⌘ ⇧ M` 将语音写入 Agent 输入框
 6. **系统控制** — 播放、音量、亮度、Wi-Fi、外观、应用、锁屏等
 7. **桌面宠物** — 随时间、天气与前台应用反应
@@ -40,7 +40,7 @@ Luma Bar 是围绕 MacBook 摄像头刘海生长的原生 macOS 桌面工作空�
 
 ## 开始使用
 
-需要 **macOS 14+** 与 Swift 6 工具链。推荐带摄像头刘海的 MacBook。
+需要 **macOS 14+** 与 Swift 6 工具链。推荐带摄像头刘海的 Mac。
 
 ### 下载（推荐）
 
@@ -133,7 +133,7 @@ Luma Bar 坚持本地优先：近期操作上下文会过期；密钥不进仓�
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - [SECURITY.md](SECURITY.md)
 
-请保持 diff 聚焦。**Liquid Glass / 岛条视觉层已冻结**，默认请勿改外观。**请勿修改** `.github/workflows/` 下的发布 / 公证流水线，除非维护者明确要求。
+请保持 diff 聚焦。**岛条视觉层已冻结**，默认请勿改外观。**请勿修改** `.github/workflows/` 下的发布 / 公证流水线，除非维护者明确要求。
 
 ## 许可证
 

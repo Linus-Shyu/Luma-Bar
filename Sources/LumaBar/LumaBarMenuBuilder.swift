@@ -8,8 +8,6 @@ final class LumaBarMenuBuilder {
 
     private var appThemeItems: [IslandTheme: NSMenuItem] = [:]
     private var statusThemeItems: [IslandTheme: NSMenuItem] = [:]
-    private var appLanguageItems: [LumaBarAppLanguage: NSMenuItem] = [:]
-    private var statusLanguageItems: [LumaBarAppLanguage: NSMenuItem] = [:]
     private weak var appShowHideItem: NSMenuItem?
     private weak var statusShowHideItem: NSMenuItem?
     private weak var appSelectionTranslationItem: NSMenuItem?
@@ -45,7 +43,6 @@ final class LumaBarMenuBuilder {
         populatePrimaryGroups(
             into: appMenu,
             themeStorage: &appThemeItems,
-            languageStorage: &appLanguageItems,
             showHideStorage: &appShowHideItem,
             selectionTranslationStorage: &appSelectionTranslationItem,
             includeThemeKeyEquivalents: true,
@@ -73,7 +70,6 @@ final class LumaBarMenuBuilder {
         populatePrimaryGroups(
             into: menu,
             themeStorage: &statusThemeItems,
-            languageStorage: &statusLanguageItems,
             showHideStorage: &statusShowHideItem,
             selectionTranslationStorage: &statusSelectionTranslationItem,
             includeThemeKeyEquivalents: false,
@@ -91,15 +87,6 @@ final class LumaBarMenuBuilder {
         }
     }
 
-    func updateLanguageState(_ language: LumaBarAppLanguage) {
-        for (itemLanguage, item) in appLanguageItems {
-            item.state = itemLanguage == language ? .on : .off
-        }
-        for (itemLanguage, item) in statusLanguageItems {
-            item.state = itemLanguage == language ? .on : .off
-        }
-    }
-
     func updateSelectionTranslationState(isEnabled: Bool) {
         appSelectionTranslationItem?.state = isEnabled ? .on : .off
         statusSelectionTranslationItem?.state = isEnabled ? .on : .off
@@ -113,20 +100,18 @@ final class LumaBarMenuBuilder {
 
     // MARK: - Layout
 
-    /// Group 1: Theme + Language + Show/Hide
+    /// Group 1: Theme + Show/Hide
     /// Group 2: Selection Translation + Permissions + Help + About
     /// Group 3: Quit
     private func populatePrimaryGroups(
         into menu: NSMenu,
         themeStorage: inout [IslandTheme: NSMenuItem],
-        languageStorage: inout [LumaBarAppLanguage: NSMenuItem],
         showHideStorage: inout NSMenuItem?,
         selectionTranslationStorage: inout NSMenuItem?,
         includeThemeKeyEquivalents: Bool,
         includeQuitKeyEquivalent: Bool
     ) {
         themeStorage.removeAll()
-        languageStorage.removeAll()
 
         // —— Group 1: Core ——
         let themeParent = NSMenuItem(title: LumaBarL10n.theme, action: nil, keyEquivalent: "")
@@ -135,10 +120,6 @@ final class LumaBarMenuBuilder {
             includeKeyEquivalents: includeThemeKeyEquivalents
         )
         menu.addItem(themeParent)
-
-        let languageParent = NSMenuItem(title: LumaBarL10n.language, action: nil, keyEquivalent: "")
-        languageParent.submenu = makeLanguageSubmenu(storage: &languageStorage)
-        menu.addItem(languageParent)
 
         let showHide = makeItem(
             title: LumaBarL10n.showMainPanel,
@@ -225,23 +206,6 @@ final class LumaBarMenuBuilder {
             storage[theme] = item
         }
 
-        return submenu
-    }
-
-    private func makeLanguageSubmenu(storage: inout [LumaBarAppLanguage: NSMenuItem]) -> NSMenu {
-        let submenu = NSMenu(title: LumaBarL10n.language)
-        for (index, language) in LumaBarAppLanguage.allCases.enumerated() {
-            let item = makeItem(
-                title: language.menuTitle,
-                action: #selector(AppDelegate.selectAppLanguage(_:))
-            )
-            item.tag = index
-            item.representedObject = language.rawValue
-            // Ensure nested menu items keep an explicit target (status-item menus are picky).
-            item.target = target
-            submenu.addItem(item)
-            storage[language] = item
-        }
         return submenu
     }
 

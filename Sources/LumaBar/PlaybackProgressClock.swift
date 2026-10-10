@@ -12,8 +12,9 @@ struct PlaybackProgressClock: Equatable, Sendable {
     private(set) var playbackRate: Double = 1
     private(set) var trackIdentity: String = ""
 
-    /// Polling jitter below this delta is ignored so the bar does not jump.
-    static let calibrationTolerance: TimeInterval = 1.5
+    /// Polling jitter below this delta is ignored so the bar/lyrics do not jump.
+    /// MediaRemote samples often wobble 1–2s; a tighter window strobes lyric lines.
+    static let calibrationTolerance: TimeInterval = 2.75
 
     func calculatedCurrentTime(at date: Date = Date()) -> TimeInterval {
         let capped: (TimeInterval) -> TimeInterval = { value in
@@ -125,6 +126,11 @@ struct PlaybackProgressClock: Equatable, Sendable {
         }
 
         let local = calculatedCurrentTime(at: date)
+        // Music.app reports 0 for a while after play. Snapping there restarts the bar at
+        // the beginning until a later poll finally returns the real position.
+        if sanitizedSystem <= 0.05, local > 0.5 {
+            return
+        }
         let delta = abs(sanitizedSystem - local)
         if delta > Self.calibrationTolerance {
             cachedPosition = sanitizedSystem

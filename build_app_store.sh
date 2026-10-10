@@ -41,11 +41,15 @@ echo "Building with LUMA_APP_STORE=1 (Package.swift define + -Xswiftc -DLUMA_APP
 # Also pass -Xswiftc -DLUMA_APP_STORE so the macro cannot be dropped if Package.swift is bypassed.
 swift build -c release -Xswiftc -DLUMA_APP_STORE
 cp "$ROOT/.build/release/LumaBar" "$APP/Contents/MacOS/LumaBar"
-# SwiftPM looks for this beside the .app bundle root. A sandboxed app cannot fall back to .build.
+# Bundle.module lookup checks Resources and the executable's own directory; a bundle
+# at the .app root is unsealed and makes codesign fail ("unsealed contents present in
+# the bundle root"). Keep it in standard sealed locations only.
 RESOURCE_BUNDLE="$ROOT/.build/release/LumaBar_LumaBar.bundle"
 if [[ -d "$RESOURCE_BUNDLE" ]]; then
-  rm -rf "$APP/LumaBar_LumaBar.bundle"
-  cp -R "$RESOURCE_BUNDLE" "$APP/LumaBar_LumaBar.bundle"
+  rm -rf "$APP/Contents/Resources/LumaBar_LumaBar.bundle"
+  cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/"
+  rm -rf "$APP/Contents/MacOS/LumaBar_LumaBar.bundle"
+  cp -R "$RESOURCE_BUNDLE" "$APP/Contents/MacOS/"
 fi
 
 # Guardrail: private MediaRemote must not appear in the MAS binary.

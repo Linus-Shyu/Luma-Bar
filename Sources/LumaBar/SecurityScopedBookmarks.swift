@@ -10,6 +10,7 @@ enum SecurityScopedBookmarks {
         case kiroHome
         case kiroApplicationSupport
         case cherryStudioSupport
+        case deepSeekHarnessHome
         case musicLibrary
         case netEaseStorage
 
@@ -27,6 +28,8 @@ enum SecurityScopedBookmarks {
                 return "窗口已打开到 Kiro 的数据文件夹。直接点「授权访问」，用来显示额度。"
             case .cherryStudioSupport:
                 return "窗口已打开到 Cherry Studio 的数据文件夹。直接点「授权访问」，用来同步当前任务。"
+            case .deepSeekHarnessHome:
+                return "窗口已打开到 DeepSeek Harness 的 .dsh 文件夹。直接点「授权访问」，用来在任务完成时提醒。"
             case .musicLibrary:
                 return "窗口已打开到音乐文件夹。直接点「授权访问」，用来扫描本地歌曲，以及播放网易云已下载的 mp3 / m4a / flac。"
             case .netEaseStorage:
@@ -55,6 +58,8 @@ enum SecurityScopedBookmarks {
                 return home
                     .appendingPathComponent("Library/Application Support/CherryStudio")
                     .path
+            case .deepSeekHarnessHome:
+                return home.appendingPathComponent(".dsh").path
             case .musicLibrary:
                 return home.appendingPathComponent("Music").path
             case .netEaseStorage:

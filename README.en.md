@@ -1,6 +1,6 @@
 # Luma Bar [![Release](https://img.shields.io/github/v/release/Linus-Shyu/Luma-Bar?label=release)](https://github.com/Linus-Shyu/Luma-Bar/releases/latest)
 
-Luma Bar is a native macOS workspace that grows around the MacBook camera notch. It uses the system safe areas beside the notch for music, a local AI agent, voice input, in-notch task alerts, system controls, and a desktop pet — without covering the camera.
+Luma Bar is a native macOS workspace that grows around the camera notch on Macs. It uses the system safe areas beside the notch for music, a local AI agent, voice input, in-notch task alerts, system controls, and a desktop pet — without covering the camera.
 
 > [!NOTE]
 > 简体中文文档见 [README.md](README.md)。
@@ -40,7 +40,7 @@ See [docs/OPEN_SOURCE.md](docs/OPEN_SOURCE.md) for what is open-sourced and what
 
 ## Get started
 
-Requires **macOS 14+** and a Swift 6 toolchain. A notched MacBook is recommended.
+Requires **macOS 14+** and a Swift 6 toolchain. A Mac with a camera notch is recommended.
 
 ### Download (recommended)
 
@@ -133,7 +133,7 @@ Issues and PRs are welcome. Please read:
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - [SECURITY.md](SECURITY.md)
 
-Keep diffs focused. **Liquid Glass / island chrome is frozen** — do not restyle it by default. **Do not change** release / notarization pipelines under `.github/workflows/` unless maintainers ask.
+Keep diffs focused. **Island chrome visuals are frozen** — do not restyle them by default. **Do not change** release / notarization pipelines under `.github/workflows/` unless maintainers ask.
 
 ## License
 
