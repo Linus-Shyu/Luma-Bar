@@ -26,6 +26,16 @@ Luma Bar 的每一步成长都离不开这些伙伴的支持，**特别感谢他
 | **[亚马逊云科技](https://www.amazonaws.cn/en/)** | 授予赛道二等奖与 10,000 元奖金，对 Luma Bar 的莫大肯定 | — |
 | **[Bonjour](https://bonjour.bio/)** | Luma Bar 的内容社区，承载它的内容与故事 | — |
 
+### 💛 个人赞助 · Individual Sponsors
+
+<p align="center">
+  <img src="docs/images/sponsors/avatars/caiziqi.png" width="76" alt="蔡子奇">
+  <a href="https://github.com/Hongbro886" title="Hongbro886"><img src="docs/images/sponsors/avatars/hongbro886.png" width="76" alt="Hongbro886"></a>
+  <img src="docs/images/sponsors/avatars/qianxun.png" width="76" alt="千峋">
+</p>
+
+<p align="center">感谢 <b>蔡子奇</b>、<b>Hongbro886</b>、<b>千峋</b> 的赞助与信任。</p>
+
 ### 核心能力
 
 1. **原生刘海布局** — 使用 `auxiliaryTopLeftArea` / `auxiliaryTopRightArea`，摄像头居中不被盖住

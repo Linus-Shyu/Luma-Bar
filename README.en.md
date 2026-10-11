@@ -26,6 +26,16 @@ Luma Bar would not be where it is without these partners — **our sincere thank
 | **[Amazon Web Services](https://www.amazonaws.cn/en/)** | Awarded the track second prize and ¥10,000 — a wonderful vote of confidence | — |
 | **[Bonjour](https://bonjour.bio/)** | Luma Bar's content community, home of its content and stories | — |
 
+### 💛 Individual Sponsors
+
+<p align="center">
+  <img src="docs/images/sponsors/avatars/caiziqi.png" width="76" alt="Cai Ziqi">
+  <a href="https://github.com/Hongbro886" title="Hongbro886"><img src="docs/images/sponsors/avatars/hongbro886.png" width="76" alt="Hongbro886"></a>
+  <img src="docs/images/sponsors/avatars/qianxun.png" width="76" alt="Qianxun">
+</p>
+
+<p align="center">Thanks to <b>Cai Ziqi</b>, <b>Hongbro886</b> and <b>Qianxun</b> for their support.</p>
+
 ### Core concepts
 
 1. **Notch-native layout** — `auxiliaryTopLeftArea` / `auxiliaryTopRightArea`; camera stays clear

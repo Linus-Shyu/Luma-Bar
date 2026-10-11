@@ -347,6 +347,13 @@ enum HelpGuidePresenter {
 
 // MARK: - About & Acknowledgements
 
+struct LumaBarIndividualSponsor: Identifiable {
+    let id: String
+    let name: String
+    let avatarName: String
+    let url: URL?
+}
+
 struct LumaBarCreditEntry: Identifiable {
     let id: String
     let name: String
@@ -432,6 +439,23 @@ enum LumaBarCredits {
         ]
     }
 
+    static var individuals: [LumaBarIndividualSponsor] {
+        [
+            LumaBarIndividualSponsor(id: "caiziqi", name: "蔡子奇", avatarName: "sponsor-caiziqi", url: nil),
+            LumaBarIndividualSponsor(
+                id: "hongbro886",
+                name: "Hongbro886",
+                avatarName: "sponsor-hongbro886",
+                url: URL(string: "https://github.com/Hongbro886")
+            ),
+            LumaBarIndividualSponsor(id: "qianxun", name: "千峋", avatarName: "sponsor-qianxun", url: nil)
+        ]
+    }
+
+    static func avatar(named name: String) -> NSImage? {
+        logo(named: name)
+    }
+
     static func logo(named name: String) -> NSImage? {
         let bundle = LumaBarL10n.resourceBundle
         // SPM's resource processing flattens subdirectories into the bundle root;
@@ -492,6 +516,16 @@ struct AboutLumaBarView: View {
                     ForEach(LumaBarCredits.entries) { entry in
                         creditCard(entry)
                     }
+
+                    Text(LumaBarL10n.aboutIndividualTitle.uppercased())
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .tracking(1.4)
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 6)
+                    Text(LumaBarL10n.aboutIndividualThanks)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    individualSponsors
                 }
                 .padding(.bottom, 2)
             }
@@ -499,7 +533,7 @@ struct AboutLumaBarView: View {
             footer
         }
         .padding(22)
-        .frame(width: 460, height: 680)
+        .frame(width: 460, height: 790)
         .background(
             ZStack {
                 Color(nsColor: .windowBackgroundColor)
@@ -575,6 +609,48 @@ struct AboutLumaBarView: View {
             .keyboardShortcut(.defaultAction)
         }
         .padding(.top, 14)
+    }
+
+    private var individualSponsors: some View {
+        HStack(alignment: .top, spacing: 16) {
+            ForEach(LumaBarCredits.individuals) { sponsor in
+                Button {
+                    if let url = sponsor.url {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    VStack(spacing: 6) {
+                        Group {
+                            if let image = LumaBarCredits.avatar(named: sponsor.avatarName) {
+                                Image(nsImage: image)
+                                    .resizable()
+                                    .scaledToFit()
+                            } else {
+                                ZStack {
+                                    Circle().fill(Color.primary.opacity(0.1))
+                                    Text(String(sponsor.name.prefix(1)))
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .frame(width: 52, height: 52)
+                        .clipShape(Circle())
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+                        .shadow(color: Color.black.opacity(0.12), radius: 4, y: 1)
+
+                        Text(sponsor.name)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(sponsor.url == nil ? Color.secondary : Color.accentColor)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help(sponsor.url?.absoluteString ?? sponsor.name)
+                .disabled(sponsor.url == nil)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
     }
 
     private func creditCard(_ entry: LumaBarCreditEntry) -> some View {
@@ -706,7 +782,7 @@ enum AboutLumaBarPresenter {
         }
         let hosting = NSHostingView(rootView: AboutLumaBarView { close() })
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 680),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 790),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false

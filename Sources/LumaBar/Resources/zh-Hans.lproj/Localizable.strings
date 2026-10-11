@@ -318,3 +318,5 @@
 "about.thanks.adventurex" = "特别感谢 AdventureX——Luma Bar 诞生于此，从一张草图成长为完整的作品。";
 "about.thanks.aws" = "特别感谢亚马逊云科技授予赛道二等奖与 10,000 元奖金，这是对 Luma Bar 莫大的肯定。";
 "about.thanks.bonjour" = "特别感谢 Bonjour 社区，这里承载了 Luma Bar 的内容与故事，让更多人认识它。";
+"about.individual_title" = "个人赞助";
+"about.individual_thanks" = "感谢这些支持者的赞助与信任。";

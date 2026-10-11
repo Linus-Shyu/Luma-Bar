@@ -52,6 +52,10 @@ enum LumaBarL10n {
     }
     static var aboutCreditsClose: String { tr("about.close", "Close") }
 
+    static var aboutIndividualTitle: String { tr("about.individual_title", "Individual Sponsors") }
+    static var aboutIndividualThanks: String {
+        tr("about.individual_thanks", "Thank you to these supporters for backing Luma Bar.")
+    }
     static var aboutThanksTitle: String { tr("about.thanks_title", "Special Thanks") }
     static var aboutThanksXCombinator: String {
         tr("about.thanks.xcombinator", "Special thanks to Lloyd and X-Combinator for funding our Apple Developer Account, which let Luma Bar polish every detail for the App Store.")
