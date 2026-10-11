@@ -51,8 +51,6 @@ and [SECURITY.md](../SECURITY.md).
 **Release CI / notarization workflows are maintained by the core team.** Please
 do not open PRs that rewrite `.github/workflows/` unless maintainers ask.
 
-## Historical commercial docs
+## Licensing
 
-Files such as `docs/COMMERCIALIZATION.md` and `docs/GO_TO_MARKET.md` may still
-describe older product experiments. They are **not** the license of this
-repository. When in doubt, `LICENSE` + `NOTICE` win.
+When in doubt, `LICENSE` + `NOTICE` win.
