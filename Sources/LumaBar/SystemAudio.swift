@@ -18,7 +18,6 @@ import SQLite3
 import Speech
 import SwiftUI
 
-
 @MainActor
 enum SystemAudioController {
     static func outputVolume() -> Double? {

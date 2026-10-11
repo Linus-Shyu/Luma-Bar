@@ -117,6 +117,7 @@ final class NativeMusicSeekBarView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        SeekTrace.log("bar mouseDown allows=\(allowsScrubbing) duration=\(duration)")
         guard allowsScrubbing, duration > 0, bounds.width > 1 else { return }
         // Return immediately and track via monitors + poll. A blocking nextEvent loop
         // on this nonactivating panel never sees dragged events, so drag felt like click-only.
@@ -129,6 +130,7 @@ final class NativeMusicSeekBarView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        SeekTrace.log("bar view mouseUp tracking=\(isTrackingSeek)")
         guard isTrackingSeek else { return }
         commitSeekTracking(atScreenLocation: screenPoint(for: event))
     }
@@ -153,9 +155,13 @@ final class NativeMusicSeekBarView: NSView {
                     self?.scrubPollTimer = nil
                     return
                 }
+                if NSEvent.pressedMouseButtons & 1 == 0 {
+                    SeekTrace.log("bar poll sees button released while tracking")
+                }
                 self.applySeek(atScreenLocation: NSEvent.mouseLocation, commit: false)
             }
         }
+        SeekTrace.log("bar beginSeekTracking")
         RunLoop.main.add(poll, forMode: .common)
         RunLoop.main.add(poll, forMode: .eventTracking)
         scrubPollTimer = poll
@@ -167,6 +173,7 @@ final class NativeMusicSeekBarView: NSView {
                 return event
             }
             if event.type == .leftMouseUp {
+                SeekTrace.log("bar local monitor mouseUp")
                 self.commitSeekTracking(atScreenLocation: NSEvent.mouseLocation)
                 return nil
             }
@@ -180,6 +187,7 @@ final class NativeMusicSeekBarView: NSView {
             DispatchQueue.main.async {
                 guard let self, self.scrubGeneration == generation, self.isTrackingSeek else { return }
                 if event.type == .leftMouseUp {
+                    SeekTrace.log("bar global monitor mouseUp")
                     self.commitSeekTracking(atScreenLocation: NSEvent.mouseLocation)
                 } else {
                     self.applySeek(atScreenLocation: NSEvent.mouseLocation, commit: false)
@@ -189,6 +197,7 @@ final class NativeMusicSeekBarView: NSView {
     }
 
     private func commitSeekTracking(atScreenLocation screenPoint: NSPoint) {
+        SeekTrace.log("bar commitSeekTracking tracking=\(isTrackingSeek)")
         guard isTrackingSeek else { return }
         applySeek(atScreenLocation: screenPoint, commit: true)
         finishSeekTracking(commit: false)

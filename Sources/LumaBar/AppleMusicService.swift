@@ -77,6 +77,7 @@ final class AppleMusicService: MusicServiceProtocol {
     }
 
     func play() {
+        SeekTrace.log("svc play() clock=\(progressClock.calculatedCurrentTime()) state=\(playerState)")
         bumpTransportEpoch()
         suppressPausedSampleUntil = Date().addingTimeInterval(1.2)
         if var track = currentTrack {
@@ -291,8 +292,11 @@ final class AppleMusicService: MusicServiceProtocol {
           end try
         end tell
         """
+        SeekTrace.log("svc seek \(seconds) resume=\(shouldResume) dispatch")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            SeekTrace.log("svc seek script start")
             _ = Self.runAppleScriptReturningString(script)
+            SeekTrace.log("svc seek script end")
             DispatchQueue.main.async {
                 guard let self else { return }
                 if shouldResume {
@@ -337,6 +341,7 @@ final class AppleMusicService: MusicServiceProtocol {
         let finish: @MainActor (MusicNowPlayingInfo?) -> Void = { [weak self] info in
             guard let self else { return }
             let missedTransport = epoch != self.transportEpoch
+            SeekTrace.log("svc refresh finish missed=\(missedTransport) incoming=\(info?.position ?? -1) playing=\(info?.isPlaying ?? false) clockBefore=\(self.progressClock.calculatedCurrentTime())")
             if !missedTransport {
                 self.apply(info)
             }
@@ -490,6 +495,7 @@ final class AppleMusicService: MusicServiceProtocol {
     }
 
     private func handleParsedPlayerInfo(_ info: MusicNowPlayingInfo?) {
+        SeekTrace.log("svc playerInfo pos=\(info?.position ?? -1) playing=\(info?.isPlaying ?? false) clock=\(progressClock.calculatedCurrentTime())")
         if let info {
             if info.artworkData == nil, let existing = currentTrack?.artworkData,
                Self.sameTrack(info, currentTrack)
@@ -627,7 +633,9 @@ final class AppleMusicService: MusicServiceProtocol {
         end tell
         """
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            SeekTrace.log("svc cmd \(command) start")
             _ = Self.runAppleScriptReturningString(script)
+            SeekTrace.log("svc cmd \(command) end")
             guard refreshAfter else { return }
             DispatchQueue.main.async {
                 self?.scheduleRefresh(after: 0.2)
@@ -654,8 +662,10 @@ final class AppleMusicService: MusicServiceProtocol {
         """
 
         DispatchQueue.global(qos: .userInitiated).async {
+            SeekTrace.log("svc poll start")
             let output = Self.runAppleScriptReturningString(script)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            SeekTrace.log("svc poll end \(output.split(separator: "|").suffix(2).joined(separator: " "))")
             let info = Self.parseAppleScriptNowPlaying(output)
             DispatchQueue.main.async {
                 completion(info)

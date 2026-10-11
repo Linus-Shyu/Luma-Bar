@@ -18,11 +18,10 @@ import SQLite3
 import Speech
 import SwiftUI
 
-
 @MainActor
 final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
-// MARK: - Published state
     @Published var theme = IslandTheme.saved {
+// MARK: - Published state
         didSet {
             theme.persist()
         }
@@ -123,14 +122,14 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
     }
     @Published var cameraGapWidth = NotchMetrics.fallbackCameraGap
 
-// MARK: - Host callbacks
     var requestExpandedPanelPreservation: ((String, TimeInterval) -> Void)?
+// MARK: - Host callbacks
     var requestExpandedPanelDismissal: (() -> Void)?
     var requestDesktopPetMessage: ((String) -> Void)?
     var requestTaskCompletionPresentation: (() -> Bool)?
 
-// MARK: - Private engine state
     var audioPlayer: AVAudioPlayer?
+// MARK: - Private engine state
     /// True only while `audioPlayer` holds a NetEase download. A local-library song left in the
     /// engine must never answer NetEase's Play button or hide what the NetEase client is playing.
     var audioPlayerHoldsNetEaseDownload = false
@@ -269,8 +268,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         let configured = environment["LUMA_BAR_WORK_REMINDER_SECONDS"].flatMap(TimeInterval.init)
         return max(60, configured ?? 7_200)
     }()
-// MARK: - Lifecycle
     override init() {
+// MARK: - Lifecycle
         super.init()
         AgentCredentialStore.clearKeychainOverrideIfBundled()
         agentHasAPIKey = AgentCredentialStore.currentAPIKey() != nil
@@ -285,6 +284,22 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         )
         AppleMusicService.shared.startMonitoring { [weak self] in
             self?.applyAppleMusicNowPlaying(AppleMusicService.shared.currentTrack)
+        }
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.lumabar.debugSeek"), object: nil, queue: .main
+        ) { [weak self] note in
+            let progress = Double(note.object as? String ?? "") ?? 0.5
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                SeekTrace.log("DEBUG commitSeek \(progress) route=\(self.shouldRouteControlsToAppleMusic) displayedPlaying=\(self.displayedIsPlaying)")
+                self.commitSeek(progress: progress)
+                for step in 1...40 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + Double(step) * 0.1) { [weak self] in
+                        guard let self else { return }
+                        SeekTrace.log("UI pos=\(String(format: "%.2f", self.displayedPosition)) playing=\(self.displayedIsPlaying) seeking=\(self.isSeekingPlayback) svc=\(AppleMusicService.shared.playerState)")
+                    }
+                }
+            }
         }
     }
 
@@ -368,6 +383,7 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         if progress >= 0.85 { return Color.islandTangerine }
         if progress >= 0.70 { return theme.primaryAccent }
         return theme.isLight ? theme.primaryAccent.opacity(0.92) : Color.islandGreen
+// MARK: - Presentation helpers
     }
 
     var isNetEaseContext: Bool {
@@ -383,7 +399,6 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         activeAppContext.icon
     }
 
-// MARK: - Presentation helpers
     func refreshLocalizedChromeAfterLanguageChange() {
         guard !isAgentStreaming, !isAgentShellRunning, !isVoiceWhisperRecording, !isVoiceWhisperFinalizing else {
             objectWillChange.send()
@@ -826,7 +841,8 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         return min(1, max(0, displayedPosition / duration))
     }
 
-    /// Store builds cannot move a song NetEase itself is playing. Local files and Apple Music can.
+    /// NetEase-owned playback has no timeline at all, so it can never be scrubbed. Local
+    /// files, Apple Music, and our own engine (including NetEase-download takeovers) can.
     var canSeekPlayback: Bool {
         guard showsPlaybackTimeline, displayedDuration > 0 else { return false }
         // The store build cannot send NetEase a seek. Only a downloaded copy we decode ourselves can move.
@@ -881,8 +897,9 @@ final class MusicPlayerModel: NSObject, ObservableObject, AVAudioPlayerDelegate 
         return copy
     }
 
-    /// NetEase does not publish a playhead. The store build draws the estimate anchored on the
-    /// history row's start time, and only while that estimate still holds.
+    /// NetEase publishes no playhead and honors no external seek, so its own playback has no
+    /// timeline in either build. A local-copy takeover runs on our engine (not routed to
+    /// NetEase) and keeps its real timeline.
     var showsPlaybackTimeline: Bool {
 #if LUMA_APP_STORE
         if shouldRouteControlsToNetEase {

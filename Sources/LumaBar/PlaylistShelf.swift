@@ -18,7 +18,6 @@ import SQLite3
 import Speech
 import SwiftUI
 
-
 @MainActor
 final class PlaylistSwipeMonitorView: NSView {
     var onSwipe: ((Int) -> Void)?
