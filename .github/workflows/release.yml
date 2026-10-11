@@ -9,6 +9,14 @@ on:
       - main
     tags:
       - "v*"
+    # Documentation-only pushes skip the release pipeline. Note that GitHub does
+    # not evaluate path filters for tag pushes, so tagging still publishes.
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+      - "NOTICE"
+      - "promo/**"
   workflow_dispatch:
 
 permissions:
