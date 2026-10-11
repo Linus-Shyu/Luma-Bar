@@ -428,7 +428,7 @@ enum LumaBarCredits {
                 id: "bonjour",
                 name: "Bonjour",
                 role: LumaBarL10n.aboutCreditsBonjourRole,
-                founder: nil,
+                founder: "Vincent",
                 thanks: LumaBarL10n.aboutThanksBonjour,
                 url: URL(string: "https://bonjour.bio/")!,
                 logoName: "bonjour",

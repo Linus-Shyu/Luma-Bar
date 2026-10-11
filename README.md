@@ -24,7 +24,7 @@ Luma Bar 的每一步成长都离不开这些伙伴的支持，**特别感谢他
 | **[Everlasting Zone](https://everlasting.zone/)** | 提供项目资金支持，让 Luma Bar 能够持续迭代、不断生长 | Shorpen |
 | **[AdventureX](https://www.adventure-x.cn/)** | Luma Bar 诞生的地方——从一张草图成长为完整的作品 | — |
 | **[亚马逊云科技](https://www.amazonaws.cn/en/)** | 授予赛道二等奖与 10,000 元奖金，对 Luma Bar 的莫大肯定 | — |
-| **[Bonjour](https://bonjour.bio/)** | Luma Bar 的内容社区，承载它的内容与故事 | — |
+| **[Bonjour](https://bonjour.bio/)** | Luma Bar 的内容社区，承载它的内容与故事 | Vincent |
 
 ### 💛 个人赞助 · Individual Sponsors
 

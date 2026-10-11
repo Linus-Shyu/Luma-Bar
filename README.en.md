@@ -24,7 +24,7 @@ Luma Bar would not be where it is without these partners — **our sincere thank
 | **[Everlasting Zone](https://everlasting.zone/)** | Provided funding support that keeps Luma Bar iterating and growing | Shorpen |
 | **[AdventureX](https://www.adventure-x.cn/)** | Where Luma Bar was born — from a sketch into a full product | — |
 | **[Amazon Web Services](https://www.amazonaws.cn/en/)** | Awarded the track second prize and ¥10,000 — a wonderful vote of confidence | — |
-| **[Bonjour](https://bonjour.bio/)** | Luma Bar's content community, home of its content and stories | — |
+| **[Bonjour](https://bonjour.bio/)** | Luma Bar's content community, home of its content and stories | Vincent |
 
 ### 💛 Individual Sponsors
 
