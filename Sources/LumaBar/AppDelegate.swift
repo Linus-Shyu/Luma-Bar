@@ -1590,9 +1590,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
                 .filter(\.isVisible)
             visibleWindows.forEach { $0.alphaValue = 0 }
             animatePanelsInFromNotch(visibleWindows)
-            // After Spaces, rebuild translucent surfaces so glass isn't stuck gray/black.
+            // After leaving fullscreen, refresh glass/chrome without rebuilding hosting
+            // views. A hosting rebuild here re-layouts the freshly faded-in bar and the
+            // UI visibly adjusts once (worst on Aura, whose backdrop path re-applies the
+            // whole layout twice).
             DispatchQueue.main.asyncAfter(deadline: .now() + fullScreenTransitionDuration + 0.05) { [weak self] in
-                self?.refreshTranslucentSurfacesAfterSpaceChange(rebuildHosting: true)
+                self?.refreshTranslucentSurfacesAfterSpaceChange(rebuildHosting: false)
             }
         } else {
             // Instant Space restore: keep hosting views, only re-assert chrome + glass.
