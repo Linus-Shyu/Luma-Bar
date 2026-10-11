@@ -402,12 +402,38 @@ enum MenuBarStatusItemProbe {
     /// Last successfully probed edge per display, kept across short gaps where the
     /// menu bar windows are briefly absent (fullscreen / Space transitions).
     private nonisolated(unsafe) static var lastKnown: [CGDirectDisplayID: (edge: CGFloat, at: Date)] = [:]
+    /// While a fullscreen / Space transition settles the menu bar animates in and a
+    /// probe taken mid-flight reports a transient edge — the bar shrank to it and
+    /// then grew back once the menu bar settled. Hold probes off during the settle.
+    private nonisolated(unsafe) static var suppressionUntil = Date.distantPast
+
+    /// Pause fresh probes while a transition settles. The remembered edge still
+    /// answers, so the layout stays put instead of tracking a transient animation frame.
+    static func suspendProbing(for duration: TimeInterval) {
+        suppressionUntil = max(suppressionUntil, Date().addingTimeInterval(duration))
+    }
+
+    /// The remembered edge for a display, if any. Callers restoring panels after a
+    /// transition use this to decide whether a fresh layout is trustworthy.
+    static func rememberedEdge(for screen: NSScreen?) -> CGFloat? {
+        guard let screen else { return nil }
+        return lastKnown[screen.displayID]?.edge
+    }
 
     /// Leftmost edge of foreign status items on `screen`, in AppKit screen
     /// coordinates. `nil` when the screen currently shows no status items.
     static func leftEdge(on screen: NSScreen) -> CGFloat? {
         let displayID = screen.displayID
         let now = Date()
+        if now < suppressionUntil {
+            // Answer from memory only — never sample the animating menu bar, and
+            // never let a transient reading replace the remembered edge.
+            if let known = lastKnown[displayID] {
+                cache[displayID] = (known.edge, now)
+                return known.edge
+            }
+            return cache[displayID]?.edge
+        }
         if let cached = cache[displayID], now.timeIntervalSince(cached.at) < minInterval {
             return cached.edge
         }

@@ -1498,6 +1498,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
         isHiddenForFullScreen = true
         fullScreenRestoreUntil = .distantPast
+        // Sample nothing while the fullscreen Space is switching: the menu bar is
+        // going away and a probe here would only record a transient edge.
+        MenuBarStatusItemProbe.suspendProbing(for: fullScreenTransitionDuration + 1.5)
         // Keep model.isExpanded / token overlay state so leaving fullscreen can
         // restore instantly without waiting for another Cursor/Codex activation.
         fullScreenHideWorkItem?.cancel()
@@ -1561,14 +1564,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
 
         let wasHiddenForFullScreen = isHiddenForFullScreen
         isHiddenForFullScreen = false
+        // The menu bar animates back in during this transition, so a probe taken now
+        // reports a transient edge and the bar visibly re-layouts once it settles.
+        // Freeze probing and keep the frames the bar already had; the steady-state
+        // relayout pass still corrects a genuine change after the settle.
+        MenuBarStatusItemProbe.suspendProbing(for: fullScreenTransitionDuration + 1.5)
+        let hasRememberedEdge = MenuBarStatusItemProbe.rememberedEdge(for: islandScreen) != nil
+        let hasUsableFrames = (leftWindow?.frame.width ?? 0) > 1
         let layout = notchLayout()
         for window in [cameraWindow, leftWindow, rightWindow, expandedWindow] {
             window?.level = persistentIslandWindowLevel
             window?.collectionBehavior = islandWindowCollectionBehavior
         }
-        leftWindow?.setFrame(layout.leftFrame, display: false)
-        cameraWindow?.setFrame(layout.leftFrame.union(layout.cameraFrame).union(layout.rightFrame), display: false)
-        rightWindow?.setFrame(layout.rightFrame, display: false)
+        if hasRememberedEdge || !hasUsableFrames {
+            leftWindow?.setFrame(layout.leftFrame, display: false)
+            cameraWindow?.setFrame(layout.leftFrame.union(layout.cameraFrame).union(layout.rightFrame), display: false)
+            rightWindow?.setFrame(layout.rightFrame, display: false)
+        }
         keepCompactPanelsVisible(alphaValue: fadeIn ? 0 : 1)
         updateDesktopPetVisibility()
 
