@@ -5,6 +5,27 @@ Luma Bar is a native macOS workspace that grows around the camera notch on Macs.
 > [!NOTE]
 > 简体中文文档见 [README.md](README.md)。
 
+
+## 🏆 Sponsors & Partners
+
+Luma Bar would not be where it is without these partners — **our sincere thanks to each of them**:
+
+<p align="center">
+  <a href="https://x-combinator.xyz/" title="X-Combinator"><img src="docs/images/sponsors/xcombinator-card.png" width="76" alt="X-Combinator"></a>
+  <a href="https://everlasting.zone/" title="Everlasting Zone"><img src="docs/images/sponsors/everlasting-card.png" width="200" alt="Everlasting Zone"></a>
+  <a href="https://www.adventure-x.cn/" title="AdventureX"><img src="docs/images/sponsors/adventurex-card.png" width="76" alt="AdventureX"></a>
+  <a href="https://www.amazonaws.cn/en/" title="Amazon Web Services"><img src="docs/images/sponsors/aws-card.png" width="76" alt="Amazon Web Services"></a>
+  <a href="https://bonjour.bio/" title="Bonjour"><img src="docs/images/sponsors/bonjour-card.png" width="76" alt="Bonjour"></a>
+</p>
+
+| Partner | What they did for Luma Bar | Founder |
+|---------|----------------------------|---------|
+| **[X-Combinator](https://x-combinator.xyz/)** | Funded our Apple Developer Account, letting Luma Bar polish every detail for the App Store | Lloyd |
+| **[Everlasting Zone](https://everlasting.zone/)** | Provided funding support that keeps Luma Bar iterating and growing | Shorpen |
+| **[AdventureX](https://www.adventure-x.cn/)** | Where Luma Bar was born — from a sketch into a full product | — |
+| **[Amazon Web Services](https://www.amazonaws.cn/en/)** | Awarded the track second prize and ¥10,000 — a wonderful vote of confidence | — |
+| **[Bonjour](https://bonjour.bio/)** | Luma Bar's content community, home of its content and stories | — |
+
 ### Core concepts
 
 1. **Notch-native layout** — `auxiliaryTopLeftArea` / `auxiliaryTopRightArea`; camera stays clear

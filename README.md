@@ -5,6 +5,27 @@ Luma Bar 是围绕 Mac 摄像头刘海生长的原生 macOS 桌面工作空间�
 > [!NOTE]
 > English documentation: [README.en.md](README.en.md).
 
+
+## 🏆 赞助与伙伴 · Sponsors & Partners
+
+Luma Bar 的每一步成长都离不开这些伙伴的支持，**特别感谢他们**：
+
+<p align="center">
+  <a href="https://x-combinator.xyz/" title="X-Combinator"><img src="docs/images/sponsors/xcombinator-card.png" width="76" alt="X-Combinator"></a>
+  <a href="https://everlasting.zone/" title="Everlasting Zone"><img src="docs/images/sponsors/everlasting-card.png" width="200" alt="Everlasting Zone"></a>
+  <a href="https://www.adventure-x.cn/" title="AdventureX"><img src="docs/images/sponsors/adventurex-card.png" width="76" alt="AdventureX"></a>
+  <a href="https://www.amazonaws.cn/en/" title="亚马逊云科技"><img src="docs/images/sponsors/aws-card.png" width="76" alt="亚马逊云科技"></a>
+  <a href="https://bonjour.bio/" title="Bonjour"><img src="docs/images/sponsors/bonjour-card.png" width="76" alt="Bonjour"></a>
+</p>
+
+| 伙伴 | 他们为 Luma Bar 做了什么 | 创始人 |
+|------|--------------------------|--------|
+| **[X-Combinator](https://x-combinator.xyz/)** | 提供 Apple Developer Account 的资金，让 Luma Bar 得以面向 App Store 打磨每一个细节 | Lloyd |
+| **[Everlasting Zone](https://everlasting.zone/)** | 提供项目资金支持，让 Luma Bar 能够持续迭代、不断生长 | Shorpen |
+| **[AdventureX](https://www.adventure-x.cn/)** | Luma Bar 诞生的地方——从一张草图成长为完整的作品 | — |
+| **[亚马逊云科技](https://www.amazonaws.cn/en/)** | 授予赛道二等奖与 10,000 元奖金，对 Luma Bar 的莫大肯定 | — |
+| **[Bonjour](https://bonjour.bio/)** | Luma Bar 的内容社区，承载它的内容与故事 | — |
+
 ### 核心能力
 
 1. **原生刘海布局** — 使用 `auxiliaryTopLeftArea` / `auxiliaryTopRightArea`，摄像头居中不被盖住
