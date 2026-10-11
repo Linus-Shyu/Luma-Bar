@@ -399,6 +399,9 @@ enum MenuBarStatusItemProbe {
     private static let minInterval: TimeInterval = 1.0
 
     private nonisolated(unsafe) static var cache: [CGDirectDisplayID: (edge: CGFloat?, at: Date)] = [:]
+    /// Last successfully probed edge per display, kept across short gaps where the
+    /// menu bar windows are briefly absent (fullscreen / Space transitions).
+    private nonisolated(unsafe) static var lastKnown: [CGDirectDisplayID: (edge: CGFloat, at: Date)] = [:]
 
     /// Leftmost edge of foreign status items on `screen`, in AppKit screen
     /// coordinates. `nil` when the screen currently shows no status items.
@@ -410,11 +413,25 @@ enum MenuBarStatusItemProbe {
         }
         let edge = probeLeftEdge(on: screen)
         cache[displayID] = (edge, now)
-        return edge
+        if let edge {
+            lastKnown[displayID] = (edge, now)
+            return edge
+        }
+        // During fullscreen / Space transitions the menu bar windows are briefly off
+        // screen, so a fresh probe reports "no status items" and the layout would jump
+        // to the full, status-item-free width — then shrink back once the menu bar
+        // reappears. Reuse the last known edge so the bar keeps its width through the
+        // transition.
+        if let known = lastKnown[displayID], now.timeIntervalSince(known.at) < 15 {
+            cache[displayID] = (known.edge, now)
+            return known.edge
+        }
+        return nil
     }
 
     static func invalidate() {
         cache.removeAll()
+        lastKnown.removeAll()
     }
 
     private static func probeLeftEdge(on screen: NSScreen) -> CGFloat? {
