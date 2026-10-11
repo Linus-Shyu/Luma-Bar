@@ -344,6 +344,7 @@ enum HelpGuidePresenter {
     }
 }
 
+
 // MARK: - About & Acknowledgements
 
 struct LumaBarCreditEntry: Identifiable {
@@ -351,11 +352,17 @@ struct LumaBarCreditEntry: Identifiable {
     let name: String
     let role: String
     let founder: String?
+    let thanks: String
     let url: URL
+    let logoName: String
+    /// Light artwork needs a dark tile behind it; dark artwork a light tile.
+    let usesLightLogo: Bool
+    /// Wide wordmark treatment instead of a square icon tile.
+    let isWordmark: Bool
 }
 
-/// Acknowledgements data. Roles resolve through the localization system each access,
-/// so a mid-run language switch updates the list without recreating it.
+/// Acknowledgements data. Localized strings resolve on each access, so a mid-run
+/// language switch updates the list without recreating it.
 enum LumaBarCredits {
     static var entries: [LumaBarCreditEntry] {
         [
@@ -364,37 +371,68 @@ enum LumaBarCredits {
                 name: "X-Combinator",
                 role: LumaBarL10n.aboutCreditsXCombinatorRole,
                 founder: "Lloyd",
-                url: URL(string: "https://x-combinator.xyz/")!
+                thanks: LumaBarL10n.aboutThanksXCombinator,
+                url: URL(string: "https://x-combinator.xyz/")!,
+                logoName: "xcombinator",
+                usesLightLogo: true,
+                isWordmark: false
             ),
             LumaBarCreditEntry(
                 id: "everlasting",
                 name: "Everlasting Zone",
                 role: LumaBarL10n.aboutCreditsEverlastingRole,
                 founder: "Shorpen",
-                url: URL(string: "https://everlasting.zone/")!
+                thanks: LumaBarL10n.aboutThanksEverlasting,
+                url: URL(string: "https://everlasting.zone/")!,
+                logoName: "everlasting",
+                usesLightLogo: true,
+                isWordmark: true
             ),
             LumaBarCreditEntry(
                 id: "adventurex",
                 name: "AdventureX",
                 role: LumaBarL10n.aboutCreditsAdventureXRole,
                 founder: nil,
-                url: URL(string: "https://www.adventure-x.cn/")!
+                thanks: LumaBarL10n.aboutThanksAdventureX,
+                url: URL(string: "https://www.adventure-x.cn/")!,
+                logoName: "adventurex",
+                usesLightLogo: true,
+                isWordmark: false
             ),
             LumaBarCreditEntry(
                 id: "aws",
                 name: "Amazon Web Services · 亚马逊云科技",
                 role: LumaBarL10n.aboutCreditsAWSRole,
                 founder: nil,
-                url: URL(string: "https://www.amazonaws.cn/en/")!
+                thanks: LumaBarL10n.aboutThanksAWS,
+                url: URL(string: "https://www.amazonaws.cn/en/")!,
+                logoName: "aws",
+                usesLightLogo: false,
+                isWordmark: false
             ),
             LumaBarCreditEntry(
                 id: "bonjour",
                 name: "Bonjour",
                 role: LumaBarL10n.aboutCreditsBonjourRole,
                 founder: nil,
-                url: URL(string: "https://bonjour.bio/")!
+                thanks: LumaBarL10n.aboutThanksBonjour,
+                url: URL(string: "https://bonjour.bio/")!,
+                logoName: "bonjour",
+                usesLightLogo: true,
+                isWordmark: false
             )
         ]
+    }
+
+    static func logo(named name: String) -> NSImage? {
+        guard let path = LumaBarL10n.resourceBundle.path(
+            forResource: name,
+            ofType: "png",
+            inDirectory: "Credits"
+        ) else {
+            return nil
+        }
+        return NSImage(contentsOfFile: path)
     }
 }
 
@@ -417,17 +455,17 @@ struct AboutLumaBarView: View {
             // Header
             HStack(spacing: 12) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
                         .fill(Color.accentColor.opacity(0.14))
                     Image(systemName: "capsule.fill")
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(.system(size: 21, weight: .semibold))
                         .foregroundStyle(Color.accentColor)
                 }
-                .frame(width: 42, height: 42)
+                .frame(width: 46, height: 46)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(LumaBarL10n.appName)
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 17, weight: .bold))
                     Text(versionLine)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
@@ -445,21 +483,20 @@ struct AboutLumaBarView: View {
             Divider()
                 .padding(.vertical, 12)
 
-            // Credits heading
-            VStack(alignment: .leading, spacing: 3) {
-                Text(LumaBarL10n.aboutCreditsTitle)
-                    .font(.system(size: 13, weight: .semibold))
-                Text(LumaBarL10n.aboutCreditsIntro)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, 10)
+            // Intro
+            Text(LumaBarL10n.aboutCreditsIntro)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 12)
 
-            // Credit cards
+            // Special thanks cards
             ScrollView {
-                VStack(spacing: 7) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(LumaBarL10n.aboutThanksTitle)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
                     ForEach(LumaBarCredits.entries) { entry in
                         creditCard(entry)
                     }
@@ -469,6 +506,9 @@ struct AboutLumaBarView: View {
 
             // Footer
             HStack {
+                Text(LumaBarL10n.aboutCreditsOpenWebsite)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
                 Spacer()
                 Button(LumaBarL10n.aboutCreditsClose) {
                     onClose()
@@ -478,52 +518,87 @@ struct AboutLumaBarView: View {
             .padding(.top, 12)
         }
         .padding(20)
-        .frame(width: 400, height: 470)
+        .frame(width: 440, height: 640)
         .background(.regularMaterial)
     }
 
     private func creditCard(_ entry: LumaBarCreditEntry) -> some View {
-        Button {
-            NSWorkspace.shared.open(entry.url)
-        } label: {
-            HStack(alignment: .top, spacing: 10) {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 12) {
+                logoTile(entry)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.name)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.primary)
+                        .font(.system(size: 13, weight: .semibold))
                     Text(entry.role)
                         .font(.system(size: 10.5))
                         .foregroundStyle(.secondary)
                     if let founder = entry.founder {
                         Text(LumaBarL10n.aboutCreditsFounder(founder))
-                            .font(.system(size: 10))
+                            .font(.system(size: 9.5))
                             .foregroundStyle(.tertiary)
                     }
                 }
-                Spacer(minLength: 4)
-                VStack(spacing: 2) {
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                    Text(LumaBarL10n.aboutCreditsOpenWebsite)
-                        .font(.system(size: 8.5))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.top, 1)
+                Spacer(minLength: 0)
             }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.primary.opacity(0.045))
+
+            Text(entry.thanks)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                NSWorkspace.shared.open(entry.url)
+            } label: {
+                HStack(spacing: 4) {
+                    Text(LumaBarL10n.aboutCreditsOpenWebsite)
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 8, weight: .semibold))
+                }
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(Color.accentColor)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.primary.opacity(0.045))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func logoTile(_ entry: LumaBarCreditEntry) -> some View {
+        let corner: CGFloat = entry.isWordmark ? 10 : 12
+        let size: CGSize = entry.isWordmark
+            ? CGSize(width: 112, height: 48)
+            : CGSize(width: 58, height: 58)
+        RoundedRectangle(cornerRadius: corner, style: .continuous)
+            .fill(Color.black.opacity(entry.usesLightLogo ? 0.82 : 0.06))
+            .frame(width: size.width, height: size.height)
+            .overlay(
+                logoImage(entry)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(entry.isWordmark ? 10 : 9)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func logoImage(_ entry: LumaBarCreditEntry) -> Image {
+        if let image = LumaBarCredits.logo(named: entry.logoName) {
+            Image(nsImage: image)
+        } else {
+            Image(systemName: "building.columns")
         }
-        .buttonStyle(.plain)
-        .help(LumaBarL10n.aboutCreditsOpenWebsite + " · " + entry.url.absoluteString)
     }
 }
 
@@ -539,7 +614,7 @@ enum AboutLumaBarPresenter {
         }
         let hosting = NSHostingView(rootView: AboutLumaBarView { close() })
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 470),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 640),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false

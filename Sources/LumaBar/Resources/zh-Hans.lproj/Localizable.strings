@@ -312,3 +312,9 @@
 "about.credits.founder_format" = "创始人：%@";
 "about.credits.open_website" = "访问官网";
 "about.close" = "关闭";
+"about.thanks_title" = "特别感谢";
+"about.thanks.xcombinator" = "特别感谢 Lloyd 与 X-Combinator 提供的 Apple Developer Account 资金支持，让 Luma Bar 得以面向 App Store 打磨每一个细节。";
+"about.thanks.everlasting" = "特别感谢 Shorpen 与 Everlasting Zone 的资金支持，让 Luma Bar 能够持续迭代、不断生长。";
+"about.thanks.adventurex" = "特别感谢 AdventureX——Luma Bar 诞生于此，从一张草图成长为完整的作品。";
+"about.thanks.aws" = "特别感谢亚马逊云科技授予赛道二等奖与 10,000 元奖金，这是对 Luma Bar 莫大的肯定。";
+"about.thanks.bonjour" = "特别感谢 Bonjour 社区，这里承载了 Luma Bar 的内容与故事，让更多人认识它。";

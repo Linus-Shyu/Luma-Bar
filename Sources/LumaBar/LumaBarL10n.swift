@@ -52,6 +52,23 @@ enum LumaBarL10n {
     }
     static var aboutCreditsClose: String { tr("about.close", "Close") }
 
+    static var aboutThanksTitle: String { tr("about.thanks_title", "Special Thanks") }
+    static var aboutThanksXCombinator: String {
+        tr("about.thanks.xcombinator", "Special thanks to Lloyd and X-Combinator for funding our Apple Developer Account, which let Luma Bar polish every detail for the App Store.")
+    }
+    static var aboutThanksEverlasting: String {
+        tr("about.thanks.everlasting", "Special thanks to Shorpen and Everlasting Zone for the funding that keeps Luma Bar iterating and growing.")
+    }
+    static var aboutThanksAdventureX: String {
+        tr("about.thanks.adventurex", "Special thanks to AdventureX, where Luma Bar was born and grew from a sketch into a full product.")
+    }
+    static var aboutThanksAWS: String {
+        tr("about.thanks.aws", "Special thanks to Amazon Web Services for the track second prize and ¥10,000 award — a wonderful vote of confidence in Luma Bar.")
+    }
+    static var aboutThanksBonjour: String {
+        tr("about.thanks.bonjour", "Special thanks to the Bonjour community, home of Luma Bar's content and stories.")
+    }
+
     static func aboutVersion(version: String, build: String, copyright: String) -> String {
         let format = tr("about.version_format", "Version %@ (%@)\n\n%@")
             .replacingOccurrences(of: "\\n", with: "\n")
