@@ -145,6 +145,10 @@ Luma Bar 坚持本地优先：近期操作上下文会过期；密钥不进仓�
 - **Keychain** — 模型凭据
 
 
+## ⭐ Star 增长 · Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Linus-Shyu/Luma-Bar&type=date&legend=top-left)](https://www.star-history.com/#Linus-Shyu/Luma-Bar&type=date&legend=top-left)
+
 ## 致谢
 
 依赖与运行时能力离不开这些生态：

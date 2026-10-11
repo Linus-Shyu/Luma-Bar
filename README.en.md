@@ -145,6 +145,10 @@ Stack overview:
 - **Keychain** — provider credentials
 
 
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Linus-Shyu/Luma-Bar&type=date&legend=top-left)](https://www.star-history.com/#Linus-Shyu/Luma-Bar&type=date&legend=top-left)
+
 ## Acknowledgements
 
 This project builds on:
