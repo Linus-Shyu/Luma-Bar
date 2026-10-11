@@ -147,7 +147,14 @@ Luma Bar 坚持本地优先：近期操作上下文会过期；密钥不进仓�
 
 ## ⭐ Star 增长 · Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Linus-Shyu/Luma-Bar&type=date&legend=top-left)](https://www.star-history.com/#Linus-Shyu/Luma-Bar&type=date&legend=top-left)
+<p align="center">
+  <a href="https://www.star-history.com/#Linus-Shyu/Luma-Bar&type=date&legend=top-left">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Linus-Shyu/Luma-Bar&type=date&legend=top-left&theme=dark">
+      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Linus-Shyu/Luma-Bar&type=date&legend=top-left">
+    </picture>
+  </a>
+</p>
 
 ## 致谢
 
