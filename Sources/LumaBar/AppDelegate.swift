@@ -2877,21 +2877,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
     }
 
     @objc func showAboutFromMenu() {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
-        let copyright = Bundle.main.object(forInfoDictionaryKey: "NSHumanReadableCopyright") as? String
-            ?? "Copyright © 2026 Luma Bar Core Team"
-        let alert = NSAlert()
-        alert.messageText = LumaBarL10n.appName
-        alert.informativeText = LumaBarL10n.aboutVersion(
-            version: version,
-            build: build,
-            copyright: copyright
-        )
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: LumaBarL10n.aboutOK)
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
+        AboutLumaBarPresenter.show()
     }
 
     @objc func showHelpFromMenu() {
@@ -2917,6 +2903,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, IslandPanelActionHandl
             statusItem.button?.toolTip = LumaBarL10n.appName
         }
         HelpGuidePresenter.reloadForLanguageChange()
+        AboutLumaBarPresenter.reloadForLanguageChange()
         if permissionWindow != nil {
             permissionWindow?.title = LumaBarL10n.permissionWindowTitle
             let allowsAutoFinish = !PermissionOnboardingModel.hasCompletedSetup

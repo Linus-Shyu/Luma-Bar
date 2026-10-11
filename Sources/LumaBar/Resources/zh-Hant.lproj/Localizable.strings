@@ -297,3 +297,13 @@
 "translate.consent.allow" = "開啟";
 "translate.consent.decline" = "暫不開啟";
 "permission.guide.automation.2.store" = "或打開「隱私權與安全性 → 自動化」，允許控制 Music";
+"about.credits_title" = "致謝";
+"about.credits_intro" = "Luma Bar 的誕生離不開這些夥伴與社群的支持。";
+"about.credits.xcombinator_role" = "提供 Apple Developer Account 的資金";
+"about.credits.everlasting_role" = "提供專案資金支持";
+"about.credits.adventurex_role" = "Luma Bar 誕生的地方";
+"about.credits.aws_role" = "賽道二等獎 · 10,000 元獎金";
+"about.credits.bonjour_role" = "內容社群";
+"about.credits.founder_format" = "創辦人：%@";
+"about.credits.open_website" = "前往官網";
+"about.close" = "關閉";

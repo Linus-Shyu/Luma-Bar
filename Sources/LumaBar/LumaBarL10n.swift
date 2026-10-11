@@ -23,6 +23,35 @@ enum LumaBarL10n {
     static var selectAll: String { tr("menu.select_all", "Select All") }
     static var aboutOK: String { tr("about.ok", "OK") }
 
+    // MARK: About credits
+
+    static var aboutCreditsTitle: String { tr("about.credits_title", "Acknowledgements") }
+    static var aboutCreditsIntro: String {
+        tr("about.credits_intro", "Luma Bar is made possible by these partners and communities.")
+    }
+    static var aboutCreditsXCombinatorRole: String {
+        tr("about.credits.xcombinator_role", "Funded the Apple Developer Account")
+    }
+    static var aboutCreditsEverlastingRole: String {
+        tr("about.credits.everlasting_role", "Provided funding support")
+    }
+    static var aboutCreditsAdventureXRole: String {
+        tr("about.credits.adventurex_role", "Where Luma Bar was born")
+    }
+    static var aboutCreditsAWSRole: String {
+        tr("about.credits.aws_role", "Track second prize · ¥10,000")
+    }
+    static var aboutCreditsBonjourRole: String {
+        tr("about.credits.bonjour_role", "Content community")
+    }
+    static func aboutCreditsFounder(_ name: String) -> String {
+        String(format: tr("about.credits.founder_format", "Founder: %@"), locale: resolvedLocale, name)
+    }
+    static var aboutCreditsOpenWebsite: String {
+        tr("about.credits.open_website", "Visit website")
+    }
+    static var aboutCreditsClose: String { tr("about.close", "Close") }
+
     static func aboutVersion(version: String, build: String, copyright: String) -> String {
         let format = tr("about.version_format", "Version %@ (%@)\n\n%@")
             .replacingOccurrences(of: "\\n", with: "\n")

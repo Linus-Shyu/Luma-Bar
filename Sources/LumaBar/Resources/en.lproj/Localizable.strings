@@ -297,3 +297,13 @@
 "translate.consent.allow" = "Turn On";
 "translate.consent.decline" = "Not Now";
 "permission.guide.automation.2.store" = "Or open Privacy & Security → Automation and allow Music";
+"about.credits_title" = "Acknowledgements";
+"about.credits_intro" = "Luma Bar is made possible by these partners and communities.";
+"about.credits.xcombinator_role" = "Funded the Apple Developer Account";
+"about.credits.everlasting_role" = "Provided funding support";
+"about.credits.adventurex_role" = "Where Luma Bar was born";
+"about.credits.aws_role" = "Track second prize · ¥10,000";
+"about.credits.bonjour_role" = "Content community";
+"about.credits.founder_format" = "Founder: %@";
+"about.credits.open_website" = "Visit website";
+"about.close" = "Close";
