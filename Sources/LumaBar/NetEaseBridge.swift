@@ -802,11 +802,11 @@ final class NetEaseBridge: @unchecked Sendable {
                     [url],
                     withApplicationAt: appURL,
                     configuration: configuration
-                ) { _, _ in }
+                )
             }
         } else {
             DispatchQueue.main.async {
-                NSWorkspace.shared.open(url, configuration: configuration) { _, _ in }
+                NSWorkspace.shared.open(url, configuration: configuration)
             }
         }
     }
@@ -823,7 +823,7 @@ final class NetEaseBridge: @unchecked Sendable {
 
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = activates
-        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, _ in }
+        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration)
     }
 
     @MainActor
@@ -838,9 +838,9 @@ final class NetEaseBridge: @unchecked Sendable {
                 [url],
                 withApplicationAt: appURL,
                 configuration: configuration
-            ) { _, _ in }
+            )
         } else {
-            NSWorkspace.shared.open(url, configuration: configuration) { _, _ in }
+            NSWorkspace.shared.open(url, configuration: configuration)
         }
     }
 

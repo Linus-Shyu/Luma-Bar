@@ -627,9 +627,9 @@ enum NetEaseScripting {
         configuration.activates = false
         configuration.promptsUserIfNeeded = false
         if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: netEaseMusicBundleIdentifier) {
-            NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: configuration) { _, _ in }
+            NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: configuration)
         } else {
-            NSWorkspace.shared.open(url, configuration: configuration) { _, _ in }
+            NSWorkspace.shared.open(url, configuration: configuration)
         }
     }
 
@@ -640,7 +640,7 @@ enum NetEaseScripting {
         }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = activates
-        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, _ in }
+        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration)
     }
 
     @MainActor
@@ -649,9 +649,9 @@ enum NetEaseScripting {
         configuration.activates = false
         configuration.promptsUserIfNeeded = false
         if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: netEaseMusicBundleIdentifier) {
-            NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: configuration) { _, _ in }
+            NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: configuration)
         } else {
-            NSWorkspace.shared.open(url, configuration: configuration) { _, _ in }
+            NSWorkspace.shared.open(url, configuration: configuration)
         }
     }
 

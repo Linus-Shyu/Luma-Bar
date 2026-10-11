@@ -462,16 +462,24 @@ final class PermissionOnboardingModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
     }
 
+    /// Nonisolated so the LaunchServices completion never inherits MainActor
+    /// isolation (which traps on macOS 27's stricter Swift runtime).
+    private nonisolated static let relaunchCompletionHandler: @Sendable (NSRunningApplication?, Error?) -> Void = { _, error in
+        guard error == nil else { return }
+        DispatchQueue.main.async {
+            NSApp.terminate(nil)
+        }
+    }
+
     func relaunch() {
         let url = Bundle.main.bundleURL
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
-            guard error == nil else { return }
-            DispatchQueue.main.async {
-                NSApp.terminate(nil)
-            }
-        }
+        NSWorkspace.shared.openApplication(
+            at: url,
+            configuration: configuration,
+            completionHandler: Self.relaunchCompletionHandler
+        )
     }
 
     static func openPrivacySettings(for permission: LumaBarPermission) {

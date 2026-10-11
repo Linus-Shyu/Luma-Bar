@@ -1025,7 +1025,7 @@ enum LocalAppLauncher {
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
             configuration.createsNewApplicationInstance = false
-            NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, _ in }
+            NSWorkspace.shared.openApplication(at: appURL, configuration: configuration)
         }
 
         return LocalAppLaunchResult(

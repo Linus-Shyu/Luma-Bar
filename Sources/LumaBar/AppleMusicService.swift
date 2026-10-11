@@ -317,7 +317,7 @@ final class AppleMusicService: MusicServiceProtocol {
         }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = activates
-        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, _ in }
+        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration)
     }
 
     func refresh(completion: (@MainActor () -> Void)?) {
