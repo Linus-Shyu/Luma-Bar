@@ -113,7 +113,6 @@ Stack overview:
 - **SQLite** — Cursor / Codex / NetEase metadata when available
 - **Keychain** — provider credentials
 
-Files such as `docs/COMMERCIALIZATION.md` may still describe older product experiments. If they conflict with the license, `LICENSE` / `NOTICE` win.
 
 ## Acknowledgements
 

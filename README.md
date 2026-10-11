@@ -113,7 +113,6 @@ Luma Bar 坚持本地优先：近期操作上下文会过期；密钥不进仓�
 - **SQLite** — Cursor / Codex / 网易云本地元数据（可用时）
 - **Keychain** — 模型凭据
 
-`docs/COMMERCIALIZATION.md` 等文件可能仍保留早期产品实验记录；与许可证冲突时以 `LICENSE` / `NOTICE` 为准。
 
 ## 致谢
 
