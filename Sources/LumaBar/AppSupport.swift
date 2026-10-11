@@ -422,7 +422,11 @@ enum MenuBarStatusItemProbe {
         // to the full, status-item-free width — then shrink back once the menu bar
         // reappears. Reuse the last known edge so the bar keeps its width through the
         // transition.
-        if let known = lastKnown[displayID], now.timeIntervalSince(known.at) < 15 {
+        // Keep the last known edge long enough to survive typical fullscreen /
+        // Space sessions: status items rarely change, and the first successful
+        // probe after the menu bar settles corrects any real change within a
+        // second or two.
+        if let known = lastKnown[displayID], now.timeIntervalSince(known.at) < 1800 {
             cache[displayID] = (known.edge, now)
             return known.edge
         }
