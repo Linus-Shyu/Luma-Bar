@@ -422,20 +422,23 @@ enum MenuBarStatusItemProbe {
         // to the full, status-item-free width — then shrink back once the menu bar
         // reappears. Reuse the last known edge so the bar keeps its width through the
         // transition.
-        // Keep the last known edge long enough to survive typical fullscreen /
-        // Space sessions: status items rarely change, and the first successful
-        // probe after the menu bar settles corrects any real change within a
-        // second or two.
-        if let known = lastKnown[displayID], now.timeIntervalSince(known.at) < 1800 {
+        // Remember the last known edge for a full day: status items rarely
+        // disappear, and any real change is corrected by the first successful
+        // probe once the menu bar settles (a second or two later). Expiring this
+        // sooner made the first fullscreen exit after a long session flash at the
+        // wrong width before shrinking.
+        if let known = lastKnown[displayID], now.timeIntervalSince(known.at) < 24 * 3600 {
             cache[displayID] = (known.edge, now)
             return known.edge
         }
         return nil
     }
 
+    /// Drop the short-lived probe cache but keep the remembered edge: a screen
+    /// parameter change can fire mid-transition (fullscreen / Space), exactly
+    /// when a fresh probe still comes back empty.
     static func invalidate() {
         cache.removeAll()
-        lastKnown.removeAll()
     }
 
     private static func probeLeftEdge(on screen: NSScreen) -> CGFloat? {
